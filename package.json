@@ -1,0 +1,46 @@
+{
+  "name": "@finlayjn/asyncapi-swift-ws-template",
+  "version": "0.1.0",
+  "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
+  "main": "template/index.js",
+  "scripts": {
+    "test": "node --test test/generate.test.js test/compile.test.js test/swift-runtime.test.js",
+    "test:static": "node --test test/generate.test.js",
+    "test:compile": "node --test test/compile.test.js",
+    "test:swift": "node --test test/swift-runtime.test.js",
+    "test:quick": "node --test test/generate.test.js"
+  },
+  "dependencies": {
+    "@asyncapi/generator-react-sdk": "^1.1.2"
+  },
+  "devDependencies": {
+    "@asyncapi/generator": "^2.5.0"
+  },
+  "generator": {
+    "apiVersion": "v3",
+    "renderer": "react",
+    "supportedProtocols": ["ws", "wss"],
+    "parameters": {
+      "server": {
+        "description": "Name of the server from the AsyncAPI spec to use for connection URL.",
+        "required": true
+      },
+      "packageName": {
+        "description": "Name for the generated Swift Package. Defaults to the spec title in PascalCase.",
+        "default": ""
+      },
+      "serialization": {
+        "description": "Wire serialization format: 'json' or 'msgpack'.",
+        "default": "json"
+      },
+      "reconnect": {
+        "description": "Generate automatic reconnection logic. 'true' or 'false'.",
+        "default": "true"
+      },
+      "typePrefix": {
+        "description": "Optional prefix prepended to all generated Swift type names (e.g. 'OMN' produces OMNPlaceOrder, OMNWebSocketClient, etc.).",
+        "default": ""
+      }
+    }
+  }
+}

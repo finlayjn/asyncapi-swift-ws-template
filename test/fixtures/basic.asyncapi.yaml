@@ -1,0 +1,116 @@
+asyncapi: 3.0.0
+info:
+  title: Test Basic WS
+  version: 1.0.0
+  description: Minimal spec for testing the Swift WS template generator.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      ping:
+        $ref: "#/components/messages/Ping"
+      pong:
+        $ref: "#/components/messages/Pong"
+      echo:
+        $ref: "#/components/messages/Echo"
+      echoReply:
+        $ref: "#/components/messages/EchoReply"
+      error:
+        $ref: "#/components/messages/Error"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/ping"
+      - $ref: "#/channels/main/messages/echo"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/pong"
+      - $ref: "#/channels/main/messages/echoReply"
+      - $ref: "#/channels/main/messages/error"
+
+components:
+  messages:
+    Ping:
+      name: ping
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: ping
+          timestamp:
+            type: integer
+
+    Pong:
+      name: pong
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: pong
+          timestamp:
+            type: integer
+
+    Echo:
+      name: echo
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: echo
+          message:
+            type: string
+        required:
+          - type
+          - message
+
+    EchoReply:
+      name: echo_reply
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: echo_reply
+          message:
+            type: string
+          server_time:
+            type: string
+            format: date-time
+        required:
+          - type
+          - message
+
+    Error:
+      name: error
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: error
+          code:
+            type: string
+          message:
+            type: string
+        required:
+          - type
+          - code
+          - message

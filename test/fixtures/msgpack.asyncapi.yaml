@@ -1,0 +1,73 @@
+asyncapi: 3.0.0
+info:
+  title: Test MsgPack Service
+  version: 1.0.0
+  description: Spec for testing MessagePack serialization generation.
+
+servers:
+  local:
+    host: localhost:9002
+    protocol: wss
+    description: Local test server (TLS)
+
+channels:
+  main:
+    address: /
+    messages:
+      subscribe:
+        $ref: "#/components/messages/Subscribe"
+      dataPoint:
+        $ref: "#/components/messages/DataPoint"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/subscribe"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/dataPoint"
+
+components:
+  messages:
+    Subscribe:
+      name: subscribe
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: subscribe
+          channels:
+            type: array
+            items:
+              type: string
+        required:
+          - type
+          - channels
+
+    DataPoint:
+      name: data_point
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: data_point
+          channel:
+            type: string
+          value:
+            type: number
+          timestamp:
+            type: integer
+        required:
+          - type
+          - channel
+          - value
+          - timestamp

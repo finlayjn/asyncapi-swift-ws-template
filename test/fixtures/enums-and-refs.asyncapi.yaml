@@ -1,0 +1,196 @@
+asyncapi: 3.0.0
+info:
+  title: Test Enums and Refs
+  version: 1.0.0
+  description: |
+    Spec that exercises enum extraction, $ref resolution, schema reuse,
+    reserved word handling, and nested objects.
+
+servers:
+  local:
+    host: localhost:9001
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      createItem:
+        $ref: "#/components/messages/CreateItem"
+      itemCreated:
+        $ref: "#/components/messages/ItemCreated"
+      updateStatus:
+        $ref: "#/components/messages/UpdateStatus"
+      statusChanged:
+        $ref: "#/components/messages/StatusChanged"
+      listItems:
+        $ref: "#/components/messages/ListItems"
+      itemList:
+        $ref: "#/components/messages/ItemList"
+      error:
+        $ref: "#/components/messages/Error"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/createItem"
+      - $ref: "#/channels/main/messages/updateStatus"
+      - $ref: "#/channels/main/messages/listItems"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/itemCreated"
+      - $ref: "#/channels/main/messages/statusChanged"
+      - $ref: "#/channels/main/messages/itemList"
+      - $ref: "#/channels/main/messages/error"
+
+components:
+  schemas:
+    ItemData:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, archived]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - status
+
+    # This schema name collides with Swift's Error protocol
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+      required:
+        - code
+        - message
+
+  messages:
+    CreateItem:
+      name: create_item
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: create_item
+          name:
+            type: string
+          priority:
+            type: string
+            enum: [low, medium, high, critical]
+        required:
+          - type
+          - name
+          - priority
+
+    ItemCreated:
+      name: item_created
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: item_created
+          item:
+            $ref: "#/components/schemas/ItemData"
+
+    UpdateStatus:
+      name: update_status
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: update_status
+          item_id:
+            type: string
+          new_status:
+            type: string
+            enum: [pending, active, archived]
+        required:
+          - type
+          - item_id
+          - new_status
+
+    StatusChanged:
+      name: status_changed
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: status_changed
+          item_id:
+            type: string
+          old_status:
+            type: string
+            enum: [pending, active, archived]
+          new_status:
+            type: string
+            enum: [pending, active, archived]
+
+    ListItems:
+      name: list_items
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: list_items
+          filter_status:
+            type: string
+            enum: [pending, active, archived]
+
+    ItemList:
+      name: item_list
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: item_list
+          items:
+            type: array
+            items:
+              $ref: "#/components/schemas/ItemData"
+
+    Error:
+      name: error
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: error
+          code:
+            type: string
+          message:
+            type: string
+        required:
+          - type
+          - code
+          - message
