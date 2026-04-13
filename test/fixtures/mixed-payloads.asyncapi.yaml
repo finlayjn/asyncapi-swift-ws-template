@@ -1,0 +1,183 @@
+asyncapi: 3.0.0
+info:
+  title: Test Mixed Payloads
+  version: 1.0.0
+  description: |
+    Spec that exercises integer enums, non-object (plain string) message payloads,
+    and mixed decoding strategies (keyed JSON objects + raw string messages).
+
+servers:
+  local:
+    host: localhost:9003
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      subscribe:
+        $ref: "#/components/messages/Subscribe"
+      unsubscribe:
+        $ref: "#/components/messages/Unsubscribe"
+      ping:
+        $ref: "#/components/messages/Ping"
+      pong:
+        $ref: "#/components/messages/Pong"
+      snapshot:
+        $ref: "#/components/messages/Snapshot"
+      update:
+        $ref: "#/components/messages/Update"
+      error:
+        $ref: "#/components/messages/Error"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/subscribe"
+      - $ref: "#/channels/main/messages/unsubscribe"
+      - $ref: "#/channels/main/messages/ping"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/pong"
+      - $ref: "#/channels/main/messages/snapshot"
+      - $ref: "#/channels/main/messages/update"
+      - $ref: "#/channels/main/messages/error"
+
+components:
+  schemas:
+    ChannelConfig:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        depth:
+          type: integer
+          enum: [5, 10, 20, 50]
+        mode:
+          type: string
+          enum: [full, delta]
+      required:
+        - channel_id
+        - depth
+        - mode
+
+  messages:
+    Subscribe:
+      name: subscribe
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: subscribe
+          channels:
+            type: array
+            items:
+              type: string
+          depth:
+            type: integer
+            enum: [5, 10, 20, 50]
+        required:
+          - type
+          - channels
+
+    Unsubscribe:
+      name: unsubscribe
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: unsubscribe
+          channels:
+            type: array
+            items:
+              type: string
+        required:
+          - type
+          - channels
+
+    # Plain string, no object payload
+    Ping:
+      name: Ping
+      title: Ping
+      summary: Client heartbeat
+      contentType: text/plain
+      payload:
+        type: string
+        const: PING
+
+    # Plain string, no object payload
+    Pong:
+      name: Pong
+      title: Pong
+      summary: Server heartbeat response
+      contentType: text/plain
+      payload:
+        type: string
+        const: PONG
+
+    Snapshot:
+      name: snapshot
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: snapshot
+          channel_id:
+            type: string
+          depth:
+            type: integer
+            enum: [5, 10, 20, 50]
+          data:
+            type: array
+            items:
+              type: string
+        required:
+          - type
+          - channel_id
+          - data
+
+    Update:
+      name: update
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: update
+          channel_id:
+            type: string
+          sequence:
+            type: integer
+            format: int64
+        required:
+          - type
+          - channel_id
+          - sequence
+
+    Error:
+      name: error
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: error
+          code:
+            type: string
+          message:
+            type: string
+        required:
+          - type
+          - code
+          - message

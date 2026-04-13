@@ -44,11 +44,15 @@ function extractMessages(asyncapi) {
 
       const payload = message.payload();
       let constTypeValue = null;
+      let hasObjectPayload = false;
 
       if (payload && typeof payload.properties === 'function') {
         const props = payload.properties();
-        if (props && props.type) {
-          constTypeValue = call(props.type, 'const') || null;
+        if (props && typeof props === 'object' && Object.keys(props).length > 0) {
+          hasObjectPayload = true;
+          if (props.type) {
+            constTypeValue = call(props.type, 'const') || null;
+          }
         }
       }
 
@@ -58,6 +62,7 @@ function extractMessages(asyncapi) {
         direction: action,
         payload,
         constTypeValue,
+        hasObjectPayload,
         title: (typeof message.title === 'function' ? message.title() : '') || '',
         summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
       });
@@ -185,6 +190,8 @@ function scanForEnums(schema, contextName, enumMap, nameCount) {
     const constVal = call(propSchema, 'const');
 
     if (enumValues && enumValues.length > 1 && constVal === undefined) {
+      const allIntegers = enumValues.every(v => typeof v === 'number' && Number.isInteger(v));
+      const rawType = allIntegers ? 'Int' : 'String';
       const key = enumValues.slice().sort().join('|');
       if (!enumMap.has(key)) {
         // Disambiguate: if a different enum already uses this property name, prefix with context
@@ -199,7 +206,7 @@ function scanForEnums(schema, contextName, enumMap, nameCount) {
           baseName,
           swiftName: _applyPrefix(baseName),
           values: enumValues,
-          rawType: 'String',
+          rawType,
         });
       }
     }

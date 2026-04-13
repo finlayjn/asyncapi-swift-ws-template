@@ -81,3 +81,23 @@ describe('swift compilation — combined (msgpack + prefix + no reconnect)', () 
     assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
   });
 });
+
+describe('swift compilation — mixed-payloads spec (int enums + plain string messages)', () => {
+  let out;
+  before(() => { out = generate('mixed-payloads.asyncapi.yaml', { server: 'local' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});
+
+describe('swift compilation — mixed-payloads with typePrefix', () => {
+  let out;
+  before(() => { out = generate('mixed-payloads.asyncapi.yaml', { server: 'local', typePrefix: 'MIX' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});

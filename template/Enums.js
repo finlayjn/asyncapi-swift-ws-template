@@ -13,7 +13,10 @@ function Enums({ asyncapi, params }) {
     const cases = e.values.map(v => {
       const caseName = toSwiftEnumCase(v);
       const cleanCase = caseName.replace(/`/g, '');
-      if (cleanCase !== v) {
+      if (e.rawType === 'Int') {
+        return `    case ${caseName} = ${v}`;
+      }
+      if (cleanCase !== String(v)) {
         return `    case ${caseName} = "${v}"`;
       }
       return `    case ${caseName}`;

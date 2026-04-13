@@ -210,7 +210,8 @@ function constValue(prop) {
  * e.g. "post_only" → "postOnly", "buy" → "buy"
  */
 function toSwiftEnumCase(value) {
-  if (!value) return '';
+  if (!value && value !== 0) return '';
+  value = String(value);
   const camel = value
     .split(/[_\s]+/)
     .filter(Boolean)
@@ -219,7 +220,9 @@ function toSwiftEnumCase(value) {
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join('');
-  return escapeSwiftKeyword(camel);
+  // Prefix with _ if starts with a digit (not a valid Swift identifier)
+  const result = /^\d/.test(camel) ? '_' + camel : camel;
+  return escapeSwiftKeyword(result);
 }
 
 /**

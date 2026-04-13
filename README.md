@@ -12,6 +12,8 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Auto-reconnect** — optional exponential backoff with configurable max attempts and base delay
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via a `type` field discriminator into a tagged enum
+- **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums
+- **Non-object message payloads** — plain string/const messages (e.g. `PING`/`PONG`) are handled as `String` cases without requiring a struct
 - **SPM package** — generates a complete Swift Package Manager project targeting Apple platforms
 
 ## Generated Output
@@ -20,7 +22,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 |------|----------|
 | `Package.swift` | SPM manifest — iOS 16+, macOS 13+, tvOS 16+, watchOS 9+ |
 | `Sources/Models.swift` | `Codable & Sendable` structs for every message payload and component schema |
-| `Sources/Enums.swift` | Shared `String`-backed enum types extracted from schemas (e.g. `Side`, `OrderType`) |
+| `Sources/Enums.swift` | Shared enum types extracted from schemas — `String`-backed (e.g. `Side`) and `Int`-backed (e.g. `Level`) |
 | `Sources/MessageEnums.swift` | `IncomingMessage` / `OutgoingMessage` tagged enums with discriminated decoding |
 | `Sources/MessageSerializer.swift` | `MessageSerializer` protocol + JSON and (optionally) MessagePack implementations |
 | `Sources/WebSocketClient.swift` | Actor-based client using `URLSessionWebSocketTask`, `AsyncStream` observation, optional auto-reconnect with exponential backoff |
@@ -173,6 +175,7 @@ Test fixtures live in `test/fixtures/` and cover:
 | `basic.asyncapi.yaml` | Minimal send/receive, CodingKeys, Error→ServerError rename |
 | `enums-and-refs.asyncapi.yaml` | Enum extraction, deduplication, `$ref` resolution, array refs, reserved type handling |
 | `msgpack.asyncapi.yaml` | MessagePack serialization, `wss://` protocol, DMMessagePack dependency |
+| `mixed-payloads.asyncapi.yaml` | Integer enums, non-object (plain string) message payloads, mixed decoding strategies |
 
 Parameter combinations tested: `serialization` (json/msgpack), `reconnect` (true/false), `typePrefix`, `packageName`, and all combinations thereof.
 
@@ -188,8 +191,7 @@ cd output/basic && swift build
 ## Known limitations
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
-- **`type` field discriminator** — incoming message decoding assumes a `type` field in every message payload for discrimination. Specs without this convention will need manual adjustment.
-- **String-backed enums only** — all extracted enums are `String`-backed. Integer or other raw types are not detected.
+- **`type` field discriminator** — incoming object message decoding assumes a `type` field in the payload for discrimination. Specs without this convention will need manual adjustment. Non-object payloads (plain strings) are matched by value.
 - **Flat struct generation** — nested anonymous objects in schemas may be mapped to `AnyCodable` or a parent-derived name rather than dedicated nested types.
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
 - **Apple platforms only** — generated code uses `URLSessionWebSocketTask` and Foundation, limiting it to Apple platforms. Linux/Windows support would require a different WebSocket library.
@@ -203,7 +205,9 @@ cd output/basic && swift build
 - [ ] **AsyncAPI v2 support** — detect spec version and use the appropriate parser API
 - [ ] **Schema composition** — handle `oneOf`, `allOf`, `anyOf` for richer type generation
 - [ ] **Nested struct generation** — generate dedicated structs for inline anonymous object schemas instead of flattening
-- [ ] **Integer / other enum raw types** — detect numeric enums and generate `Int`-backed Swift enums
+- [x] **Integer enum raw types** — detect numeric enums and generate `Int`-backed Swift enums
+- [x] **Non-object message payloads** — plain string/const messages handled as `String` enum cases
+- [ ] **Other enum raw types** — detect `Double` or other numeric enums beyond `Int`
 - [ ] **WebSocket channel bindings** — read query parameters and channel-level headers from AsyncAPI bindings
 - [ ] **Security scheme generation** — generate auth helpers from AsyncAPI security schemes (API key, bearer, OAuth2)
 - [ ] **Custom discriminator field** — allow configuring the message discrimination field name (currently hardcoded to `type`)

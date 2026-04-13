@@ -601,3 +601,176 @@ describe('cross-file consistency', () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integer enums, non-object payloads, and mixed decoding
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('mixed-payloads spec (integer enums + plain string messages)', () => {
+  let out;
+
+  before(() => {
+    out = generate('mixed-payloads.asyncapi.yaml', { server: 'local' });
+  });
+
+  // ── File structure ──
+
+  it('generates Enums.swift when spec has enums', () => {
+    assert.ok(generatedFileExists(out, 'Sources/Enums.swift'));
+  });
+
+  // ── Enums.swift — integer enums ──
+
+  describe('Enums.swift', () => {
+    let enums;
+    before(() => { enums = readGenerated(out, 'Sources/Enums.swift'); });
+
+    it('generates Int-backed Depth enum', () => {
+      assert.ok(enums.includes('public enum Depth: Int, Codable, Sendable'));
+    });
+
+    it('Depth enum has underscore-prefixed cases for integer values', () => {
+      assert.ok(enums.includes('case _5 = 5'));
+      assert.ok(enums.includes('case _10 = 10'));
+      assert.ok(enums.includes('case _20 = 20'));
+      assert.ok(enums.includes('case _50 = 50'));
+    });
+
+    it('generates String-backed Mode enum', () => {
+      assert.ok(enums.includes('public enum Mode: String, Codable, Sendable'));
+    });
+
+    it('Mode enum has correct cases', () => {
+      assert.ok(enums.includes('case full'));
+      assert.ok(enums.includes('case delta'));
+    });
+  });
+
+  // ── Models.swift — integer enum properties ──
+
+  describe('Models.swift', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('uses Depth enum type for integer enum properties', () => {
+      assert.ok(models.includes(': Depth'));
+    });
+
+    it('uses Mode enum type for string enum properties', () => {
+      assert.ok(models.includes(': Mode'));
+    });
+
+    it('generates Subscribe struct', () => {
+      assert.ok(models.includes('public struct Subscribe: Codable, Sendable'));
+    });
+
+    it('generates Snapshot struct', () => {
+      assert.ok(models.includes('public struct Snapshot: Codable, Sendable'));
+    });
+
+    it('does not generate structs for plain string messages (Ping, Pong)', () => {
+      assert.ok(!models.includes('public struct Ping:'));
+      assert.ok(!models.includes('public struct Pong:'));
+    });
+  });
+
+  // ── MessageEnums.swift — mixed payloads ──
+
+  describe('MessageEnums.swift', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('defines OutgoingMessage enum', () => {
+      assert.ok(msgEnums.includes('public enum OutgoingMessage: Sendable'));
+    });
+
+    it('defines IncomingMessage enum', () => {
+      assert.ok(msgEnums.includes('public enum IncomingMessage: Sendable'));
+    });
+
+    it('uses String associated type for plain Ping message', () => {
+      assert.ok(msgEnums.includes('case ping(String)'));
+    });
+
+    it('uses String associated type for plain Pong message', () => {
+      assert.ok(msgEnums.includes('case pong(String)'));
+    });
+
+    it('uses struct associated types for object messages', () => {
+      assert.ok(msgEnums.includes('case subscribe(Subscribe)'));
+      assert.ok(msgEnums.includes('case snapshot(Snapshot)'));
+    });
+
+    it('has unknown case', () => {
+      assert.ok(msgEnums.includes('case unknown(String)'));
+    });
+
+    it('IncomingMessage decoder tries single-value string first for plain messages', () => {
+      assert.ok(msgEnums.includes('singleValueContainer'));
+    });
+
+    it('IncomingMessage decoder falls back to keyed type discriminator for objects', () => {
+      assert.ok(msgEnums.includes('TypeKey'));
+      assert.ok(msgEnums.includes('forKey: .type'));
+    });
+
+    it('OutgoingMessage encodes plain string messages via singleValueContainer', () => {
+      assert.ok(msgEnums.includes('var container = encoder.singleValueContainer()'));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mixed-payloads with typePrefix
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('mixed-payloads with typePrefix=MIX', () => {
+  let out;
+
+  before(() => {
+    out = generate('mixed-payloads.asyncapi.yaml', { server: 'local', typePrefix: 'MIX' });
+  });
+
+  describe('Enums.swift', () => {
+    let enums;
+    before(() => { enums = readGenerated(out, 'Sources/Enums.swift'); });
+
+    it('prefixes Int-backed enum', () => {
+      assert.ok(enums.includes('public enum MIXDepth: Int, Codable, Sendable'));
+    });
+
+    it('prefixes String-backed enum', () => {
+      assert.ok(enums.includes('public enum MIXMode: String, Codable, Sendable'));
+    });
+  });
+
+  describe('Models.swift', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('prefixes struct names', () => {
+      assert.ok(models.includes('public struct MIXSubscribe:'));
+      assert.ok(models.includes('public struct MIXSnapshot:'));
+    });
+
+    it('uses prefixed enum types', () => {
+      assert.ok(models.includes(': MIXDepth'));
+      assert.ok(models.includes(': MIXMode'));
+    });
+  });
+
+  describe('MessageEnums.swift', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('plain messages still use String (not prefixed struct)', () => {
+      assert.ok(msgEnums.includes('case ping(String)'));
+      assert.ok(msgEnums.includes('case pong(String)'));
+    });
+
+    it('object messages use prefixed struct types', () => {
+      assert.ok(msgEnums.includes('case subscribe(MIXSubscribe)'));
+      assert.ok(msgEnums.includes('case snapshot(MIXSnapshot)'));
+    });
+  });
+});
