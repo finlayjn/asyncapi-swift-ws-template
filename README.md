@@ -11,9 +11,11 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction
 - **Auto-reconnect** — optional exponential backoff with configurable max attempts and base delay
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
-- **Discriminated decoding** — incoming messages are decoded via a `type` field discriminator into a tagged enum
+- **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching
 - **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums
 - **Non-object message payloads** — plain string/const messages (e.g. `PING`/`PONG`) are handled as `String` cases without requiring a struct
+- **Public initializers** — all generated structs include explicit `public init(...)` methods; `const` fields are auto-assigned and excluded from parameters
+- **Server pathname support** — the generator appends the server's `pathname` to the `host` when building the default URL
 - **SPM package** — generates a complete Swift Package Manager project targeting Apple platforms
 
 ## Generated Output
@@ -98,8 +100,8 @@ Task {
     }
 }
 
-// Send a message
-try await client.send(.auth(Auth(type: "auth", token: "my-token")))
+// Send a message — const fields (like `type`) are auto-assigned
+try await client.send(.auth(Auth(token: "my-token")))
 
 // Disconnect
 await client.disconnect()
@@ -177,6 +179,7 @@ Test fixtures live in `test/fixtures/` and cover:
 | `enums-and-refs.asyncapi.yaml` | Enum extraction, deduplication, `$ref` resolution, array refs, reserved type handling |
 | `msgpack.asyncapi.yaml` | MessagePack serialization, `wss://` protocol, DMMessagePack dependency |
 | `mixed-payloads.asyncapi.yaml` | Integer enums, non-object (plain string) message payloads, mixed decoding strategies |
+| `custom-discriminator.asyncapi.yaml` | Non-standard discriminator key (`event_type`), server `pathname`, plain string const payloads (`PING`/`PONG`), public init with const auto-assignment |
 
 Parameter combinations tested: `serialization` (json/msgpack), `reconnect` (true/false), `typePrefix`, `packageName`, and all combinations thereof.
 
@@ -192,7 +195,7 @@ cd output/basic && swift build
 ## Known limitations
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
-- **`type` field discriminator** — incoming object message decoding assumes a `type` field in the payload for discrimination. Specs without this convention will need manual adjustment. Non-object payloads (plain strings) are matched by value.
+- **Single discriminator key** — the discriminator key is auto-detected from the first `const` property found in receive message payloads. All incoming object messages must share the same discriminator key. Non-object payloads (plain strings) are matched by their `const` value.
 - **Flat struct generation** — nested anonymous objects in schemas may be mapped to `AnyCodable` or a parent-derived name rather than dedicated nested types.
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
 - **Apple platforms only** — generated code uses `URLSessionWebSocketTask` and Foundation, limiting it to Apple platforms. Linux/Windows support would require a different WebSocket library.

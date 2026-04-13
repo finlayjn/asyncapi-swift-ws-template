@@ -774,3 +774,168 @@ describe('mixed-payloads with typePrefix=MIX', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public inits on generated structs
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('public init generation', () => {
+  let out;
+
+  before(() => {
+    out = generate('basic.asyncapi.yaml', { server: 'local' });
+  });
+
+  describe('Models.swift', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('generates public init for structs', () => {
+      assert.ok(models.includes('public init('));
+    });
+
+    it('const fields are excluded from init parameters', () => {
+      // Ping struct has type (const) and timestamp (optional) properties
+      // Init should only have timestamp parameter
+      const pingStart = models.indexOf('public struct Ping:');
+      const initStart = models.indexOf('public init(', pingStart);
+      const initEnd = models.indexOf('}', initStart) + 1;
+      const pingInit = models.slice(pingStart, initEnd);
+      assert.ok(pingInit.includes('timestamp: Int?'));
+      // type should not be a parameter — it's auto-assigned from const
+      assert.ok(!pingInit.includes('type: String'));
+    });
+
+    it('const fields are auto-assigned in init body', () => {
+      assert.ok(models.includes('self.`type` = "ping"'));
+    });
+
+    it('optional parameters default to nil', () => {
+      assert.ok(models.includes('Int? = nil'));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom discriminator key (event_type instead of type)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('custom-discriminator spec (event_type key, pathname, plain string const)', () => {
+  let out;
+
+  before(() => {
+    out = generate('custom-discriminator.asyncapi.yaml', { server: 'production' });
+  });
+
+  describe('MessageEnums.swift — discriminator key', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('uses event_type as CodingKey instead of type', () => {
+      assert.ok(msgEnums.includes('case eventType = "event_type"'));
+    });
+
+    it('decodes using forKey: .eventType', () => {
+      assert.ok(msgEnums.includes('forKey: .eventType'));
+    });
+
+    it('uses snake_case const values for discriminator matching', () => {
+      assert.ok(msgEnums.includes('case "price_update":'));
+      assert.ok(msgEnums.includes('case "trade_executed":'));
+      assert.ok(msgEnums.includes('case "error":'));
+    });
+
+    it('uses plain string const value for PONG (preserves casing)', () => {
+      assert.ok(msgEnums.includes('case "PONG":'));
+    });
+
+    it('does not use PascalCase message names for matching', () => {
+      assert.ok(!msgEnums.includes('case "PriceUpdate":'));
+      assert.ok(!msgEnums.includes('case "TradeExecuted":'));
+      assert.ok(!msgEnums.includes('case "Pong":'));
+    });
+  });
+
+  describe('WebSocketClient.swift — server pathname', () => {
+    let client;
+    before(() => { client = readGenerated(out, 'Sources/WebSocketClient.swift'); });
+
+    it('includes pathname in default URL', () => {
+      assert.ok(client.includes('wss://api.example.com/ws/v2'));
+    });
+  });
+
+  describe('Models.swift — public inits with const fields', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('generates public init for Subscribe', () => {
+      assert.ok(models.includes('public struct Subscribe:'));
+      // action is const — should be auto-assigned, not a parameter
+      const structStart = models.indexOf('public struct Subscribe:');
+      const initStart = models.indexOf('public init(', structStart);
+      const initEnd = models.indexOf('}', initStart) + 1;
+      const structBlock = models.slice(structStart, initEnd);
+      assert.ok(structBlock.includes('self.action = "subscribe"'));
+      assert.ok(structBlock.includes('channels: [String]'));
+    });
+
+    it('generates public init for PriceUpdate with const auto-assigned', () => {
+      assert.ok(models.includes('self.eventType = "price_update"'));
+    });
+
+    it('does not include const fields as init parameters', () => {
+      // PriceUpdate init should not have eventType as a parameter
+      const priceStart = models.indexOf('public struct PriceUpdate:');
+      const initStart = models.indexOf('public init(', priceStart);
+      const initEnd = models.indexOf('}', initStart) + 1;
+      const initBlock = models.slice(initStart, initEnd);
+      assert.ok(!initBlock.includes('eventType: String'));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom discriminator with typePrefix
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('custom-discriminator with typePrefix=CD', () => {
+  let out;
+
+  before(() => {
+    out = generate('custom-discriminator.asyncapi.yaml', { server: 'production', typePrefix: 'CD' });
+  });
+
+  describe('MessageEnums.swift', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('prefixes enums with custom discriminator', () => {
+      assert.ok(msgEnums.includes('public enum CDIncomingMessage:'));
+      assert.ok(msgEnums.includes('public enum CDOutgoingMessage:'));
+    });
+
+    it('still uses event_type discriminator key', () => {
+      assert.ok(msgEnums.includes('case eventType = "event_type"'));
+    });
+
+    it('uses prefixed struct types', () => {
+      assert.ok(msgEnums.includes('CDPriceUpdate(from: decoder)'));
+      assert.ok(msgEnums.includes('CDServerError(from: decoder)'));
+    });
+  });
+
+  describe('Models.swift', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('prefixes struct names', () => {
+      assert.ok(models.includes('public struct CDSubscribe:'));
+      assert.ok(models.includes('public struct CDPriceUpdate:'));
+    });
+
+    it('still generates public inits', () => {
+      assert.ok(models.includes('public init('));
+    });
+  });
+});

@@ -44,15 +44,30 @@ function extractMessages(asyncapi) {
 
       const payload = message.payload();
       let constTypeValue = null;
+      let discriminatorKey = null;
       let hasObjectPayload = false;
 
       if (payload && typeof payload.properties === 'function') {
         const props = payload.properties();
         if (props && typeof props === 'object' && Object.keys(props).length > 0) {
           hasObjectPayload = true;
-          if (props.type) {
-            constTypeValue = call(props.type, 'const') || null;
+          // Find the discriminator: first property with a const value
+          for (const [key, propSchema] of Object.entries(props)) {
+            const c = call(propSchema, 'const');
+            if (c !== undefined && c !== null) {
+              discriminatorKey = key;
+              constTypeValue = String(c);
+              break;
+            }
           }
+        }
+      }
+
+      // For non-object payloads (plain string), check the payload itself for a const
+      if (!hasObjectPayload && payload) {
+        const c = call(payload, 'const');
+        if (c !== undefined && c !== null) {
+          constTypeValue = String(c);
         }
       }
 
@@ -62,6 +77,7 @@ function extractMessages(asyncapi) {
         direction: action,
         payload,
         constTypeValue,
+        discriminatorKey,
         hasObjectPayload,
         title: (typeof message.title === 'function' ? message.title() : '') || '',
         summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
@@ -288,7 +304,9 @@ function buildServerURL(asyncapi, serverName) {
     if (server.id() === serverName) {
       const protocol = server.protocol();
       const host = server.host();
-      return { protocol, host, url: `${protocol}://${host}` };
+      const pathname = typeof server.pathname === 'function' ? server.pathname() : '';
+      const path = pathname && pathname !== '/' ? pathname : '';
+      return { protocol, host, pathname: path, url: `${protocol}://${host}${path}` };
     }
   }
   return null;

@@ -1,7 +1,7 @@
 // template/MessageEnums.js — Generates IncomingMessage and OutgoingMessage tagged enums
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftEnumCase, prefixedName, setTypePrefix } = require('../helpers/swift');
+const { toSwiftEnumCase, toSwiftPropertyName, prefixedName, setTypePrefix } = require('../helpers/swift');
 const { extractMessages } = require('../helpers/schema');
 
 function MessageEnums({ asyncapi, params }) {
@@ -75,12 +75,27 @@ function MessageEnums({ asyncapi, params }) {
     lines.push('}');
     lines.push('');
 
-    // Decodable conformance — discriminated on `type` field for object messages,
+    // Decodable conformance — discriminated on detected const field for object messages,
     // plain string matching for non-object messages
     lines.push(`extension ${incomingName}: Decodable {`);
+
+    // Determine the discriminator key from object receive messages
+    const detectedKeys = objectReceive.map(m => m.discriminatorKey).filter(Boolean);
+    const discriminatorKey = detectedKeys[0] || 'type';
+    // Convert to camelCase for Swift CodingKey case name (without keyword escaping)
+    const swiftKeyName = discriminatorKey
+      .split(/[_\s]+/)
+      .filter(Boolean)
+      .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
+
     if (objectReceive.length > 0) {
       lines.push('    private enum TypeKey: String, CodingKey {');
-      lines.push('        case type');
+      if (swiftKeyName !== discriminatorKey) {
+        lines.push(`        case ${swiftKeyName} = "${discriminatorKey}"`);
+      } else {
+        lines.push(`        case ${swiftKeyName}`);
+      }
       lines.push('    }');
       lines.push('');
     }
@@ -106,7 +121,7 @@ function MessageEnums({ asyncapi, params }) {
       lines.push('');
       lines.push('        // Discriminated object messages');
       lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
-      lines.push('        let type = try container.decode(String.self, forKey: .type)');
+      lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
       lines.push('');
       lines.push('        switch type {');
       for (const msg of objectReceive) {
@@ -120,7 +135,7 @@ function MessageEnums({ asyncapi, params }) {
       lines.push('        }');
     } else if (objectReceive.length > 0) {
       lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
-      lines.push('        let type = try container.decode(String.self, forKey: .type)');
+      lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
       lines.push('');
       lines.push('        switch type {');
       for (const msg of objectReceive) {

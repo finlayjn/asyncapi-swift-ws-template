@@ -101,3 +101,23 @@ describe('swift compilation — mixed-payloads with typePrefix', () => {
     assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
   });
 });
+
+describe('swift compilation — custom-discriminator spec (event_type key)', () => {
+  let out;
+  before(() => { out = generate('custom-discriminator.asyncapi.yaml', { server: 'production' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});
+
+describe('swift compilation — custom-discriminator with typePrefix', () => {
+  let out;
+  before(() => { out = generate('custom-discriminator.asyncapi.yaml', { server: 'production', typePrefix: 'CD' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});

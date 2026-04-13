@@ -42,21 +42,23 @@ func expectEqual<T: Equatable>(_ a: T, _ b: T, _ message: String, file: String =
 
 print("── Struct Instantiation ──")
 
-let ping = Ping(type: "ping", timestamp: 1234567890)
-expect(ping.type == "ping", "Ping.type should be 'ping'")
+let ping = Ping(timestamp: 1234567890)
+expect(ping.type == "ping", "Ping.type should be 'ping' (auto-assigned from const)")
 expect(ping.timestamp == 1234567890, "Ping.timestamp should be 1234567890")
 
-let echo = Echo(type: "echo", message: "hello world")
-expect(echo.type == "echo", "Echo.type should be 'echo'")
+let echo = Echo(message: "hello world")
+expect(echo.type == "echo", "Echo.type should be 'echo' (auto-assigned from const)")
 expect(echo.message == "hello world", "Echo.message should be 'hello world'")
 
-let pong = Pong(type: "pong", timestamp: 1234567890)
-expect(pong.type == "pong", "Pong.type should be 'pong'")
+let pong = Pong(timestamp: 1234567890)
+expect(pong.type == "pong", "Pong.type should be 'pong' (auto-assigned from const)")
 
-let echoReply = EchoReply(type: "echo_reply", message: "hello", serverTime: "2025-01-01T00:00:00Z")
+let echoReply = EchoReply(message: "hello", serverTime: "2025-01-01T00:00:00Z")
+expect(echoReply.type == "echo_reply", "EchoReply.type should be 'echo_reply' (auto-assigned from const)")
 expect(echoReply.message == "hello", "EchoReply.message should be 'hello'")
 
-let error = ServerError(type: "error", code: "bad_request", message: "invalid payload")
+let error = ServerError(code: "bad_request", message: "invalid payload")
+expect(error.type == "error", "ServerError.type should be 'error' (auto-assigned from const)")
 expect(error.code == "bad_request", "ServerError.code should be 'bad_request'")
 
 // ── JSON Round-Trip ──

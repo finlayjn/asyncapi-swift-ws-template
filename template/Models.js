@@ -45,6 +45,34 @@ function renderStruct(swiftName, properties, description) {
     lines.push('    }');
   }
 
+  // Public init — Swift auto-generated memberwise init is internal
+  const initParams = properties.filter(p => !p.isConst);
+
+  if (initParams.length > 0 || properties.some(p => p.isConst)) {
+    lines.push('');
+    if (initParams.length > 0) {
+      lines.push('    public init(');
+      for (let i = 0; i < initParams.length; i++) {
+        const p = initParams[i];
+        const hasDefault = p.swiftType.endsWith('?');
+        const suffix = i < initParams.length - 1 ? ',' : '';
+        lines.push(`        ${p.swiftName}: ${p.swiftType}${hasDefault ? ' = nil' : ''}${suffix}`);
+      }
+      lines.push('    ) {');
+    } else {
+      lines.push('    public init() {');
+    }
+    for (const prop of properties) {
+      if (prop.isConst) {
+        const escaped = String(prop.constVal != null ? prop.constVal : '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        lines.push(`        self.${prop.swiftName} = "${escaped}"`);
+      } else {
+        lines.push(`        self.${prop.swiftName} = ${prop.swiftName}`);
+      }
+    }
+    lines.push('    }');
+  }
+
   lines.push('}');
 
   return lines.join('\n');

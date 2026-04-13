@@ -1,0 +1,151 @@
+asyncapi: 3.0.0
+info:
+  title: Test Custom Discriminator
+  version: 1.0.0
+  description: |
+    Spec that exercises non-standard discriminator key (event_type instead of type),
+    server pathname support, and mixed plain-string + object payloads with custom const values.
+
+servers:
+  local:
+    host: localhost:9004
+    protocol: ws
+    description: Local test server
+  production:
+    host: api.example.com
+    pathname: /ws/v2
+    protocol: wss
+    description: Production with pathname
+
+channels:
+  main:
+    address: /
+    messages:
+      subscribe:
+        $ref: "#/components/messages/Subscribe"
+      ping:
+        $ref: "#/components/messages/Ping"
+      pong:
+        $ref: "#/components/messages/Pong"
+      priceUpdate:
+        $ref: "#/components/messages/PriceUpdate"
+      tradeExecuted:
+        $ref: "#/components/messages/TradeExecuted"
+      error:
+        $ref: "#/components/messages/Error"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/subscribe"
+      - $ref: "#/channels/main/messages/ping"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/pong"
+      - $ref: "#/channels/main/messages/priceUpdate"
+      - $ref: "#/channels/main/messages/tradeExecuted"
+      - $ref: "#/channels/main/messages/error"
+
+components:
+  messages:
+    Subscribe:
+      name: subscribe
+      payload:
+        type: object
+        properties:
+          action:
+            type: string
+            const: subscribe
+          channels:
+            type: array
+            items:
+              type: string
+        required:
+          - action
+          - channels
+
+    # Plain string payloads
+    Ping:
+      name: Ping
+      contentType: text/plain
+      payload:
+        type: string
+        const: PING
+
+    Pong:
+      name: Pong
+      contentType: text/plain
+      payload:
+        type: string
+        const: PONG
+
+    # Object messages with event_type discriminator (not type)
+    PriceUpdate:
+      name: price_update
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            const: price_update
+          asset_id:
+            type: string
+          price:
+            type: string
+          timestamp:
+            type: string
+        required:
+          - event_type
+          - asset_id
+          - price
+          - timestamp
+
+    TradeExecuted:
+      name: trade_executed
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            const: trade_executed
+          asset_id:
+            type: string
+          side:
+            type: string
+          size:
+            type: string
+          price:
+            type: string
+          timestamp:
+            type: string
+        required:
+          - event_type
+          - asset_id
+          - side
+          - size
+          - price
+          - timestamp
+
+    Error:
+      name: error
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            const: error
+          code:
+            type: string
+          message:
+            type: string
+        required:
+          - event_type
+          - code
+          - message
