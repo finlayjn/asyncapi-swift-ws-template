@@ -40,6 +40,10 @@
       "typePrefix": {
         "description": "Optional prefix prepended to all generated Swift type names (e.g. 'OMN' produces OMNPlaceOrder, OMNWebSocketClient, etc.).",
         "default": ""
+      },
+      "formatter": {
+        "description": "Shell command to format generated Swift files. Receives file paths as arguments (e.g. 'swift-format -i', 'swiftformat').",
+        "default": ""
       }
     }
   }

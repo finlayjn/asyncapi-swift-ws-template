@@ -57,6 +57,7 @@ cd ./MyClient && swift build
 | `serialization` | no | `json` | Wire format: `json` or `msgpack` |
 | `reconnect` | no | `true` | Generate auto-reconnect logic with exponential backoff (`true` or `false`) |
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
+| `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
 
 ## Quick start (generated client)
 
