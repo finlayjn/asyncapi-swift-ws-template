@@ -163,6 +163,18 @@ function schemaToPlain(schema) {
     if (items) plain.items = schemaToPlain(items);
   }
 
+  // Handle prefixItems (JSON Schema tuple arrays, e.g. TupleArray: [String, String])
+  // The parser doesn't expose prefixItems() as a method, so read from raw JSON.
+  if (!plain.items) {
+    const raw = typeof schema.json === 'function' ? schema.json() : null;
+    if (raw && Array.isArray(raw.prefixItems) && raw.prefixItems.length > 0) {
+      const types = raw.prefixItems.map(pi => pi.type).filter(Boolean);
+      if (types.length === raw.prefixItems.length && new Set(types).size === 1) {
+        plain.items = { type: types[0] };
+      }
+    }
+  }
+
   const minI = call(schema, 'minItems');
   if (minI !== undefined && minI !== null) plain.minItems = minI;
   const maxI = call(schema, 'maxItems');

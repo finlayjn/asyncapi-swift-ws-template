@@ -196,7 +196,7 @@ cd output/basic && swift build
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
 - **Single discriminator key** — the discriminator key is auto-detected from the first `const` property found in receive message payloads. All incoming object messages must share the same discriminator key. Non-object payloads (plain strings) are matched by their `const` value.
-- **Flat struct generation** — nested anonymous objects in schemas may be mapped to `AnyCodable` or a parent-derived name rather than dedicated nested types.
+- **Flat struct generation** — nested anonymous objects in schemas may be mapped to `AnyCodable` or a parent-derived name rather than dedicated nested types. (Note: `prefixItems` tuple arrays where all elements share the same type are now correctly mapped to their common Swift type, e.g. `[String]`.)
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
 - **Apple platforms only** — generated code uses `URLSessionWebSocketTask` and Foundation, limiting it to Apple platforms. Linux/Windows support would require a different WebSocket library.
 - **No `oneOf` / `allOf` / `anyOf` composition** — schema composition keywords are not handled. Only direct `properties` on schemas are processed.
