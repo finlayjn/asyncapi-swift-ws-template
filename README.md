@@ -9,7 +9,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Swift 6 strict concurrency** — all generated types are `Sendable`; the client is an `actor`
 - **AsyncStream-based observation** — subscribe to incoming messages and connection state changes via `for await`
 - **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction
-- **Auto-reconnect** — optional exponential backoff with configurable max attempts and base delay
+- **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (off by default, opt in via `autoReconnect: true`)
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching
 - **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums
@@ -106,6 +106,30 @@ try await client.send(.auth(Auth(token: "my-token")))
 // Disconnect
 await client.disconnect()
 ```
+
+## Reconnection behavior
+
+When `reconnect` is `true` (the default generation parameter), the generated client includes optional auto-reconnect logic. Reconnection is **disabled at runtime by default** — pass `autoReconnect: true` in the configuration to enable it:
+
+```swift
+let client = WebSocketClient(
+    configuration: .init(
+        autoReconnect: true,          // opt in to reconnection
+        maxReconnectAttempts: 10,     // default: 10
+        baseReconnectDelay: 1.0       // default: 1 second
+    )
+)
+```
+
+**How it works:**
+
+- The connection state transitions to `.connected` only after the first successful message is received from the server (not immediately on `task.resume()`), so consumers can trust the state.
+- On unexpected disconnection, the client enters `.reconnecting(attempt: N)` and waits using exponential backoff with jitter: `min(base * 2^(attempt-1), 60s) * random(0.8…1.2)`. Jitter prevents thundering-herd reconnections when many clients lose connectivity simultaneously.
+- The reconnect attempt counter resets to zero only after a successful reconnection (confirmed by receiving a message), so `maxReconnectAttempts` is strictly enforced even if the server is unreachable.
+- Calling `disconnect()` sets an `intentionalDisconnect` flag that suppresses any in-flight or future reconnect attempts.
+- Connection state changes are observable via the `connectionState` AsyncStream: `.disconnected`, `.connecting`, `.connected`, `.reconnecting(attempt:)`.
+
+To disable reconnection support entirely at generation time (removes the code from the output), pass `-p reconnect=false`.
 
 ## Architecture
 

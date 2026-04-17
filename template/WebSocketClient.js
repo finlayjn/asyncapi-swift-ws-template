@@ -56,7 +56,7 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('        headers: [String: String] = [:],');
   lines.push(`        serializer: ${serializerProto} = ${defaultSerializer},`);
   if (reconnect) {
-    lines.push('        autoReconnect: Bool = true,');
+    lines.push('        autoReconnect: Bool = false,');
     lines.push('        maxReconnectAttempts: Int = 10,');
     lines.push('        baseReconnectDelay: TimeInterval = 1.0,');
   }
@@ -133,11 +133,6 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('        let task = session.webSocketTask(with: request)');
   lines.push('        webSocketTask = task');
   lines.push('        task.resume()');
-  lines.push('');
-  lines.push('        _currentState = .connected');
-  if (reconnect) {
-    lines.push('        reconnectAttempt = 0');
-  }
   lines.push('        startReceiving()');
   lines.push('        startPinging()');
   lines.push('    }');
@@ -192,6 +187,14 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('            guard let task = webSocketTask else { break }');
   lines.push('            do {');
   lines.push('                let message = try await task.receive()');
+  if (reconnect) {
+    lines.push('                if _currentState != .connected {');
+    lines.push('                    _currentState = .connected');
+    lines.push('                    reconnectAttempt = 0');
+    lines.push('                }');
+  } else {
+    lines.push('                if _currentState != .connected { _currentState = .connected }');
+  }
   lines.push('                let data: Data');
   lines.push('                switch message {');
   lines.push('                case .string(let text):');
@@ -251,9 +254,9 @@ function WebSocketClient({ asyncapi, params }) {
     lines.push('        _currentState = .reconnecting(attempt: reconnectAttempt)');
     lines.push('');
     lines.push('        let delay = configuration.baseReconnectDelay * pow(2.0, Double(reconnectAttempt - 1))');
-    lines.push('        let capped = min(delay, 60.0)');
+    lines.push('        let jittered = min(delay, 60.0) * Double.random(in: 0.8...1.2)');
     lines.push('');
-    lines.push('        try? await Task.sleep(for: .seconds(capped))');
+    lines.push('        try? await Task.sleep(for: .seconds(jittered))');
     lines.push('');
     lines.push('        guard !intentionalDisconnect, !Task.isCancelled else { return }');
     lines.push('        connect()');
@@ -262,6 +265,11 @@ function WebSocketClient({ asyncapi, params }) {
 
   lines.push('');
   lines.push('    deinit {');
+  lines.push('        receiveTask?.cancel()');
+  lines.push('        pingTask?.cancel()');
+  if (reconnect) {
+    lines.push('        reconnectTask?.cancel()');
+  }
   lines.push('        webSocketTask?.cancel(with: .normalClosure, reason: nil)');
   lines.push('    }');
   lines.push('}');
