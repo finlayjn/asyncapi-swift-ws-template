@@ -56,7 +56,7 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('        headers: [String: String] = [:],');
   lines.push(`        serializer: ${serializerProto} = ${defaultSerializer},`);
   if (reconnect) {
-    lines.push('        autoReconnect: Bool = false,');
+    lines.push('        autoReconnect: Bool = true,');
     lines.push('        maxReconnectAttempts: Int = 10,');
     lines.push('        baseReconnectDelay: TimeInterval = 1.0,');
   }

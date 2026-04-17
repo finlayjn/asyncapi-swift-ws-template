@@ -9,7 +9,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Swift 6 strict concurrency** — all generated types are `Sendable`; the client is an `actor`
 - **AsyncStream-based observation** — subscribe to incoming messages and connection state changes via `for await`
 - **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction
-- **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (off by default, opt in via `autoReconnect: true`)
+- **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (enabled by default)
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching
 - **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums
@@ -109,12 +109,12 @@ await client.disconnect()
 
 ## Reconnection behavior
 
-When `reconnect` is `true` (the default generation parameter), the generated client includes optional auto-reconnect logic. Reconnection is **disabled at runtime by default** — pass `autoReconnect: true` in the configuration to enable it:
+When `reconnect` is `true` (the default generation parameter), the generated client includes auto-reconnect logic, **enabled by default at runtime**. You can configure or disable it via the configuration:
 
 ```swift
 let client = WebSocketClient(
     configuration: .init(
-        autoReconnect: true,          // opt in to reconnection
+        autoReconnect: true,          // default: true
         maxReconnectAttempts: 10,     // default: 10
         baseReconnectDelay: 1.0       // default: 1 second
     )
