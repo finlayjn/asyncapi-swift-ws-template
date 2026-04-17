@@ -43,7 +43,8 @@ let package = Package(
             ],
             path: "Sources"
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )`}</Text>
     </File>
   );
