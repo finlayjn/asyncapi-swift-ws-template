@@ -352,6 +352,70 @@ describe('msgpack spec (serialization=msgpack)', () => {
       assert.ok(client.includes('wss://localhost:9002'));
     });
   });
+
+  // ── Array-format decoding for msgpack receive messages ──
+
+  describe('Models.swift — array-format decoding', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('receive struct has unkeyedContainer init(from decoder:)', () => {
+      assert.ok(models.includes('decoder.unkeyedContainer()'));
+      // DataPoint is a receive message — should have array decode
+      const dpStart = models.indexOf('public struct DataPoint:');
+      const dpEnd = models.indexOf('\n}', dpStart) + 2;
+      const dpBlock = models.slice(dpStart, dpEnd);
+      assert.ok(dpBlock.includes('init(from decoder: Decoder)'));
+      assert.ok(dpBlock.includes('decoder.unkeyedContainer()'));
+    });
+
+    it('receive struct has internal init(from container: inout UnkeyedDecodingContainer)', () => {
+      const dpStart = models.indexOf('public struct DataPoint:');
+      const dpEnd = models.indexOf('\n}', dpStart) + 2;
+      const dpBlock = models.slice(dpStart, dpEnd);
+      assert.ok(dpBlock.includes('init(from container: inout UnkeyedDecodingContainer)'));
+    });
+
+    it('container init sets const type from value, not from container', () => {
+      const dpStart = models.indexOf('public struct DataPoint:');
+      const dpEnd = models.indexOf('\n}', dpStart) + 2;
+      const dpBlock = models.slice(dpStart, dpEnd);
+      // In the container init, type should be assigned from const
+      const containerInit = dpBlock.slice(dpBlock.indexOf('internal init(from container:'));
+      assert.ok(containerInit.includes('self.`type` = "data_point"'));
+    });
+
+    it('send struct does NOT have unkeyedContainer decode', () => {
+      const subStart = models.indexOf('public struct Subscribe:');
+      const subEnd = models.indexOf('\n}', subStart) + 2;
+      const subBlock = models.slice(subStart, subEnd);
+      assert.ok(!subBlock.includes('unkeyedContainer'));
+      assert.ok(!subBlock.includes('UnkeyedDecodingContainer'));
+    });
+  });
+
+  describe('MessageEnums.swift — array-format decoding', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('IncomingMessage uses unkeyedContainer for discriminator', () => {
+      assert.ok(msgEnums.includes('decoder.unkeyedContainer()'));
+      assert.ok(msgEnums.includes('container.decode(String.self)'));
+    });
+
+    it('IncomingMessage does NOT use keyed TypeKey for msgpack', () => {
+      assert.ok(!msgEnums.includes('TypeKey'));
+      assert.ok(!msgEnums.includes('container(keyedBy:'));
+    });
+
+    it('IncomingMessage dispatches via container init', () => {
+      assert.ok(msgEnums.includes('DataPoint(from: &container)'));
+    });
+
+    it('OutgoingMessage still uses keyed encoding', () => {
+      assert.ok(msgEnums.includes('try value.encode(to: encoder)'));
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -536,6 +600,17 @@ describe('combined params (msgpack + prefix + no reconnect)', () => {
     const client = readGenerated(out, 'Sources/WebSocketClient.swift');
     assert.ok(client.includes('public actor XYZWebSocketClient'));
     assert.ok(client.includes('XYZMessagePackSerializer()'));
+  });
+
+  it('has prefixed array-format container init in Models', () => {
+    const models = readGenerated(out, 'Sources/Models.swift');
+    assert.ok(models.includes('public struct XYZDataPoint:'));
+    assert.ok(models.includes('init(from container: inout UnkeyedDecodingContainer)'));
+  });
+
+  it('has prefixed container dispatch in IncomingMessage', () => {
+    const msgEnums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(msgEnums.includes('XYZDataPoint(from: &container)'));
   });
 });
 

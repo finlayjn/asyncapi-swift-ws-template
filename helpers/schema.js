@@ -297,6 +297,7 @@ function buildPropertyList(schema, parentSwiftName, enumDefs) {
       constVal: plain.const || null,
       description: plain.description || '',
       wireFormat: propName,
+      requiredIndex: requiredFields.indexOf(propName),
     });
   }
 
@@ -324,6 +325,60 @@ function buildServerURL(asyncapi, serverName) {
   return null;
 }
 
+/**
+ * Collect all Swift type names for schemas that appear in receive messages,
+ * including nested $ref component schemas.
+ */
+function collectReceiveSchemaNames(asyncapi) {
+  const names = new Set();
+  const messages = extractMessages(asyncapi);
+
+  for (const msg of messages) {
+    if (msg.direction !== 'receive') continue;
+    if (!msg.payload) continue;
+    if (!msg.hasObjectPayload) continue;
+    names.add(msg.swiftName);
+    _collectNestedSchemaNames(msg.payload, names);
+  }
+
+  return names;
+}
+
+function _collectNestedSchemaNames(schema, names) {
+  if (!schema || typeof schema.properties !== 'function') return;
+
+  const props = schema.properties();
+  if (!props) return;
+
+  for (const [, propSchema] of Object.entries(props)) {
+    const propType = call(propSchema, 'type');
+    const id = call(propSchema, 'id');
+
+    if (propType === 'object' && id && !id.startsWith('AnonymousSchema')) {
+      const swiftName = toSwiftTypeName(id);
+      if (!names.has(swiftName)) {
+        names.add(swiftName);
+        _collectNestedSchemaNames(propSchema, names);
+      }
+    }
+
+    if (propType === 'array' && typeof propSchema.items === 'function') {
+      const items = propSchema.items();
+      if (items) {
+        const itemType = call(items, 'type');
+        const itemId = call(items, 'id');
+        if (itemType === 'object' && itemId && !itemId.startsWith('AnonymousSchema')) {
+          const swiftName = toSwiftTypeName(itemId);
+          if (!names.has(swiftName)) {
+            names.add(swiftName);
+            _collectNestedSchemaNames(items, names);
+          }
+        }
+      }
+    }
+  }
+}
+
 module.exports = {
   extractMessages,
   extractSchemas,
@@ -332,4 +387,5 @@ module.exports = {
   buildPropertyList,
   buildServerURL,
   scanForEnums,
+  collectReceiveSchemaNames,
 };

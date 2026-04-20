@@ -6,6 +6,7 @@ const { extractMessages } = require('../helpers/schema');
 
 function MessageEnums({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
+  const useMsgpack = params?.serialization === 'msgpack';
   const allMessages = extractMessages(asyncapi);
 
   const sendMessages = allMessages.filter(m => m.direction === 'send');
@@ -89,79 +90,125 @@ function MessageEnums({ asyncapi, params }) {
       .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join('');
 
-    if (objectReceive.length > 0) {
-      lines.push('    private enum TypeKey: String, CodingKey {');
-      if (swiftKeyName !== discriminatorKey) {
-        lines.push(`        case ${swiftKeyName} = "${discriminatorKey}"`);
+    if (useMsgpack && objectReceive.length > 0) {
+      // ── Msgpack array-format decoding ──
+      // Server sends events as positional arrays, not keyed maps.
+      // Decode discriminator (first element) via unkeyedContainer, then
+      // forward the container to the struct's init(from:inout UnkeyedDecodingContainer).
+
+      lines.push('    public init(from decoder: Decoder) throws {');
+
+      if (plainReceive.length > 0) {
+        lines.push('        // Try plain string messages first');
+        lines.push('        if let container = try? decoder.singleValueContainer(),');
+        lines.push('           let value = try? container.decode(String.self) {');
+        lines.push('            switch value {');
+        for (const msg of plainReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`            case "${constVal}":`);
+          lines.push(`                self = .${caseName}(value)`);
+        }
+        lines.push('            default:');
+        lines.push('                self = .unknown(value)');
+        lines.push('            }');
+        lines.push('            return');
+        lines.push('        }');
+        lines.push('');
+      }
+
+      lines.push('        // Array-format discriminated decoding (msgpack)');
+      lines.push('        var container = try decoder.unkeyedContainer()');
+      lines.push('        let type = try container.decode(String.self)');
+      lines.push('');
+      lines.push('        switch type {');
+      for (const msg of objectReceive) {
+        const caseName = toSwiftEnumCase(msg.messageName);
+        const constVal = msg.constTypeValue || msg.messageName;
+        lines.push(`        case "${constVal}":`);
+        lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: &container))`);
+      }
+      lines.push('        default:');
+      lines.push('            self = .unknown(type)');
+      lines.push('        }');
+      lines.push('    }');
+    } else {
+      // ── Standard keyed-container decoding (JSON / maps) ──
+
+      if (objectReceive.length > 0) {
+        lines.push('    private enum TypeKey: String, CodingKey {');
+        if (swiftKeyName !== discriminatorKey) {
+          lines.push(`        case ${swiftKeyName} = "${discriminatorKey}"`);
+        } else {
+          lines.push(`        case ${swiftKeyName}`);
+        }
+        lines.push('    }');
+        lines.push('');
+      }
+      lines.push('    public init(from decoder: Decoder) throws {');
+
+      if (plainReceive.length > 0 && objectReceive.length > 0) {
+        // Try single-value decoding first for plain string messages
+        lines.push('        // Try plain string messages first');
+        lines.push('        if let container = try? decoder.singleValueContainer(),');
+        lines.push('           let value = try? container.decode(String.self) {');
+        lines.push('            switch value {');
+        for (const msg of plainReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`            case "${constVal}":`);
+          lines.push(`                self = .${caseName}(value)`);
+        }
+        lines.push('            default:');
+        lines.push('                self = .unknown(value)');
+        lines.push('            }');
+        lines.push('            return');
+        lines.push('        }');
+        lines.push('');
+        lines.push('        // Discriminated object messages');
+        lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
+        lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
+        lines.push('');
+        lines.push('        switch type {');
+        for (const msg of objectReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`        case "${constVal}":`);
+          lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
+        }
+        lines.push('        default:');
+        lines.push('            self = .unknown(type)');
+        lines.push('        }');
+      } else if (objectReceive.length > 0) {
+        lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
+        lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
+        lines.push('');
+        lines.push('        switch type {');
+        for (const msg of objectReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`        case "${constVal}":`);
+          lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
+        }
+        lines.push('        default:');
+        lines.push('            self = .unknown(type)');
+        lines.push('        }');
       } else {
-        lines.push(`        case ${swiftKeyName}`);
+        lines.push('        let container = try decoder.singleValueContainer()');
+        lines.push('        let value = try container.decode(String.self)');
+        lines.push('        switch value {');
+        for (const msg of plainReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`        case "${constVal}":`);
+          lines.push(`            self = .${caseName}(value)`);
+        }
+        lines.push('        default:');
+        lines.push('            self = .unknown(value)');
+        lines.push('        }');
       }
       lines.push('    }');
-      lines.push('');
     }
-    lines.push('    public init(from decoder: Decoder) throws {');
-
-    if (plainReceive.length > 0 && objectReceive.length > 0) {
-      // Try single-value decoding first for plain string messages
-      lines.push('        // Try plain string messages first');
-      lines.push('        if let container = try? decoder.singleValueContainer(),');
-      lines.push('           let value = try? container.decode(String.self) {');
-      lines.push('            switch value {');
-      for (const msg of plainReceive) {
-        const caseName = toSwiftEnumCase(msg.messageName);
-        const constVal = msg.constTypeValue || msg.messageName;
-        lines.push(`            case "${constVal}":`);
-        lines.push(`                self = .${caseName}(value)`);
-      }
-      lines.push('            default:');
-      lines.push('                self = .unknown(value)');
-      lines.push('            }');
-      lines.push('            return');
-      lines.push('        }');
-      lines.push('');
-      lines.push('        // Discriminated object messages');
-      lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
-      lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
-      lines.push('');
-      lines.push('        switch type {');
-      for (const msg of objectReceive) {
-        const caseName = toSwiftEnumCase(msg.messageName);
-        const constVal = msg.constTypeValue || msg.messageName;
-        lines.push(`        case "${constVal}":`);
-        lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
-      }
-      lines.push('        default:');
-      lines.push('            self = .unknown(type)');
-      lines.push('        }');
-    } else if (objectReceive.length > 0) {
-      lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
-      lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
-      lines.push('');
-      lines.push('        switch type {');
-      for (const msg of objectReceive) {
-        const caseName = toSwiftEnumCase(msg.messageName);
-        const constVal = msg.constTypeValue || msg.messageName;
-        lines.push(`        case "${constVal}":`);
-        lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
-      }
-      lines.push('        default:');
-      lines.push('            self = .unknown(type)');
-      lines.push('        }');
-    } else {
-      lines.push('        let container = try decoder.singleValueContainer()');
-      lines.push('        let value = try container.decode(String.self)');
-      lines.push('        switch value {');
-      for (const msg of plainReceive) {
-        const caseName = toSwiftEnumCase(msg.messageName);
-        const constVal = msg.constTypeValue || msg.messageName;
-        lines.push(`        case "${constVal}":`);
-        lines.push(`            self = .${caseName}(value)`);
-      }
-      lines.push('        default:');
-      lines.push('            self = .unknown(value)');
-      lines.push('        }');
-    }
-    lines.push('    }');
     lines.push('}');
   }
 

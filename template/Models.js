@@ -2,12 +2,31 @@
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
 const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix } = require('../helpers/swift');
-const { extractMessages, extractSchemas, extractEnums, buildPropertyList } = require('../helpers/schema');
+const { extractMessages, extractSchemas, extractEnums, buildPropertyList, collectReceiveSchemaNames } = require('../helpers/schema');
+
+/**
+ * Sort properties by their position in the required array, then remaining in original order.
+ */
+function sortByRequiredOrder(properties) {
+  return [...properties].sort((a, b) => {
+    const ai = a.requiredIndex === -1 ? Infinity : a.requiredIndex;
+    const bi = b.requiredIndex === -1 ? Infinity : b.requiredIndex;
+    return ai - bi;
+  });
+}
 
 /**
  * Render a single Swift struct from a list of properties.
+ *
+ * @param {string} swiftName
+ * @param {Array} properties
+ * @param {string} description
+ * @param {object} options
+ * @param {boolean} options.unkeyedDecode — generate init(from decoder:) with unkeyedContainer
+ * @param {boolean} options.containerInit — generate init(from container: inout UnkeyedDecodingContainer)
  */
-function renderStruct(swiftName, properties, description) {
+function renderStruct(swiftName, properties, description, options = {}) {
+  const { unkeyedDecode = false, containerInit = false } = options;
   const lines = [];
 
   if (description) {
@@ -73,6 +92,49 @@ function renderStruct(swiftName, properties, description) {
     lines.push('    }');
   }
 
+  // ── Array-format decoding (for msgpack receive messages) ──
+  if (unkeyedDecode) {
+    const orderedProps = sortByRequiredOrder(properties);
+
+    // init(from decoder: Decoder) — decode ALL fields from an unkeyed container
+    lines.push('');
+    lines.push('    public init(from decoder: Decoder) throws {');
+    lines.push('        var container = try decoder.unkeyedContainer()');
+    for (const prop of orderedProps) {
+      const baseType = prop.swiftType.replace(/\?$/, '');
+      const isOptional = prop.swiftType.endsWith('?');
+      if (prop.isConst) {
+        lines.push(`        self.${prop.swiftName} = try container.decode(String.self)`);
+      } else if (isOptional) {
+        lines.push(`        self.${prop.swiftName} = try container.decodeIfPresent(${baseType}.self)`);
+      } else {
+        lines.push(`        self.${prop.swiftName} = try container.decode(${baseType}.self)`);
+      }
+    }
+    lines.push('    }');
+
+    // init(from container:) — type already consumed by IncomingMessage discriminator
+    if (containerInit) {
+      lines.push('');
+      lines.push('    internal init(from container: inout UnkeyedDecodingContainer) throws {');
+      for (const prop of orderedProps) {
+        if (prop.isConst) {
+          const escaped = String(prop.constVal != null ? prop.constVal : '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          lines.push(`        self.${prop.swiftName} = "${escaped}"`);
+        } else {
+          const baseType = prop.swiftType.replace(/\?$/, '');
+          const isOptional = prop.swiftType.endsWith('?');
+          if (isOptional) {
+            lines.push(`        self.${prop.swiftName} = try container.decodeIfPresent(${baseType}.self)`);
+          } else {
+            lines.push(`        self.${prop.swiftName} = try container.decode(${baseType}.self)`);
+          }
+        }
+      }
+      lines.push('    }');
+    }
+  }
+
   lines.push('}');
 
   return lines.join('\n');
@@ -80,11 +142,25 @@ function renderStruct(swiftName, properties, description) {
 
 function Models({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
+  const useMsgpack = params?.serialization === 'msgpack';
   const messages = extractMessages(asyncapi);
   const schemas = extractSchemas(asyncapi);
   const enumDefs = extractEnums(asyncapi);
   const renderedStructs = [];
   const generatedNames = new Set();
+
+  // Collect names of schemas that need array-format decoding (msgpack receive)
+  const receiveSchemaNames = useMsgpack ? collectReceiveSchemaNames(asyncapi) : new Set();
+
+  // Receive messages with object payloads also need the container init
+  const receiveMessageNames = new Set();
+  if (useMsgpack) {
+    for (const msg of messages) {
+      if (msg.direction === 'receive' && msg.hasObjectPayload) {
+        receiveMessageNames.add(msg.swiftName);
+      }
+    }
+  }
 
   // Generate structs for each message payload
   for (const msg of messages) {
@@ -96,7 +172,12 @@ function Models({ asyncapi, params }) {
     if (properties.length === 0) continue;
 
     const desc = msg.title || msg.summary || '';
-    renderedStructs.push(renderStruct(msg.swiftName, properties, desc));
+    const needsUnkeyed = receiveSchemaNames.has(msg.swiftName);
+    const needsContainerInit = receiveMessageNames.has(msg.swiftName);
+    renderedStructs.push(renderStruct(msg.swiftName, properties, desc, {
+      unkeyedDecode: needsUnkeyed,
+      containerInit: needsContainerInit,
+    }));
   }
 
   // Generate structs for component schemas
@@ -107,7 +188,11 @@ function Models({ asyncapi, params }) {
     const properties = buildPropertyList(sch.schema, sch.swiftName, enumDefs);
     if (properties.length === 0) continue;
 
-    renderedStructs.push(renderStruct(sch.swiftName, properties, ''));
+    const needsUnkeyed = receiveSchemaNames.has(sch.swiftName);
+    renderedStructs.push(renderStruct(sch.swiftName, properties, '', {
+      unkeyedDecode: needsUnkeyed,
+      containerInit: false,
+    }));
   }
 
   if (renderedStructs.length === 0) return null;
