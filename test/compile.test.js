@@ -65,6 +65,16 @@ describe('swift compilation — msgpack spec', () => {
   });
 });
 
+describe('swift compilation — msgpack spec (array format)', () => {
+  let out;
+  before(() => { out = generate('msgpack.asyncapi.yaml', { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});
+
 describe('swift compilation — combined (msgpack + prefix + no reconnect)', () => {
   let out;
   before(() => {

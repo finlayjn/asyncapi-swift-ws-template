@@ -8,7 +8,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 
 - **Swift 6 strict concurrency** — all generated types are `Sendable`; the client is an `actor`
 - **AsyncStream-based observation** — subscribe to incoming messages and connection state changes via `for await`
-- **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction. MessagePack mode generates positional (array-format) decoding for incoming events via `UnkeyedDecodingContainer`, while outgoing messages continue to encode as keyed maps
+- **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction. MessagePack mode supports both keyed map decoding (default) and positional array-format decoding via `UnkeyedDecodingContainer`, controlled by the `msgpackFormat` parameter
 - **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (enabled by default)
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching
@@ -23,7 +23,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 | File | Contents |
 |------|----------|
 | `Package.swift` | SPM manifest — iOS 16+, macOS 13+, tvOS 16+, watchOS 9+ |
-| `Sources/Models.swift` | `Codable & Sendable` structs for every message payload and component schema. When `serialization=msgpack`, receive-direction structs include custom `init(from:)` using `UnkeyedDecodingContainer` for positional array decoding |
+| `Sources/Models.swift` | `Codable & Sendable` structs for every message payload and component schema. When `msgpackFormat=array`, receive-direction structs include custom `init(from:)` using `UnkeyedDecodingContainer` for positional array decoding |
 | `Sources/Enums.swift` | Shared enum types extracted from schemas — `String`-backed (e.g. `Side`) and `Int`-backed (e.g. `Level`) |
 | `Sources/MessageEnums.swift` | `IncomingMessage` / `OutgoingMessage` tagged enums with discriminated decoding |
 | `Sources/MessageSerializer.swift` | `MessageSerializer` protocol + JSON and (optionally) MessagePack implementations |
@@ -38,9 +38,13 @@ npm install -g @asyncapi/cli
 # Generate from a local template checkout
 asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient -p server=dev
 
-# With MessagePack serialization
+# With MessagePack serialization (keyed map decoding, the default)
 asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
   -p server=dev -p serialization=msgpack
+
+# With MessagePack positional array decoding
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+  -p server=dev -p serialization=msgpack -p msgpackFormat=array
 
 # With a type prefix
 asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
@@ -57,6 +61,7 @@ cd ./MyClient && swift build
 | `server` | **yes** | — | Name of the server entry in the AsyncAPI spec to use for the default connection URL |
 | `packageName` | no | Derived from spec title | Name for the generated Swift package |
 | `serialization` | no | `json` | Wire format: `json` or `msgpack` |
+| `msgpackFormat` | no | `map` | Wire layout for msgpack messages: `map` (keyed dictionaries) or `array` (positional). Only applies when `serialization=msgpack` |
 | `reconnect` | no | `true` | Generate auto-reconnect logic with exponential backoff (`true` or `false`) |
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
 | `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
@@ -201,11 +206,11 @@ Test fixtures live in `test/fixtures/` and cover:
 |---------|-----------|
 | `basic.asyncapi.yaml` | Minimal send/receive, CodingKeys, Error→ServerError rename |
 | `enums-and-refs.asyncapi.yaml` | Enum extraction, deduplication, `$ref` resolution, array refs, reserved type handling |
-| `msgpack.asyncapi.yaml` | MessagePack serialization, `wss://` protocol, DMMessagePack dependency, array-format `UnkeyedDecodingContainer` decoding for receive structs |
+| `msgpack.asyncapi.yaml` | MessagePack serialization, `wss://` protocol, DMMessagePack dependency, keyed map decoding (default) and array-format `UnkeyedDecodingContainer` decoding (`msgpackFormat=array`) for receive structs |
 | `mixed-payloads.asyncapi.yaml` | Integer enums, non-object (plain string) message payloads, mixed decoding strategies |
 | `custom-discriminator.asyncapi.yaml` | Non-standard discriminator key (`event_type`), server `pathname`, plain string const payloads (`PING`/`PONG`), public init with const auto-assignment |
 
-Parameter combinations tested: `serialization` (json/msgpack), `reconnect` (true/false), `typePrefix`, `packageName`, and all combinations thereof.
+Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, and all combinations thereof.
 
 ### Manual generation
 
@@ -227,7 +232,7 @@ cd output/basic && swift build
 - **No query parameters or WebSocket binding support** — AsyncAPI WebSocket channel bindings (query params, headers at the channel level) are not read.
 - **No authentication generation** — while auth headers can be passed via `ClientConfiguration.headers`, no auth-specific code is generated from security schemes.
 - **MessagePack only via msgpack-swift** — the `DMMessagePack` product from [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift) is the only supported MessagePack library.
-- **MessagePack assumes array-format events** — when `serialization=msgpack`, incoming event payloads are decoded as positional arrays (ordered by the `required` array in the schema), not keyed maps. Outgoing commands still encode as keyed maps. If your server sends keyed maps, use `serialization=json` or adjust the server to send arrays.
+- **MessagePack wire format must be specified** — when `serialization=msgpack`, the `msgpackFormat` parameter controls how incoming events are decoded: `map` (default) for keyed dictionaries, or `array` for positional arrays ordered by the `required` array in the schema. Outgoing commands always encode as keyed maps regardless of format.
 
 ## Roadmap
 

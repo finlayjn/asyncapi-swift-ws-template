@@ -353,7 +353,63 @@ describe('msgpack spec (serialization=msgpack)', () => {
     });
   });
 
-  // ── Array-format decoding for msgpack receive messages ──
+  // ── Map-format decoding (default) for msgpack receive messages ──
+
+  describe('Models.swift — map-format decoding (default)', () => {
+    let models;
+    before(() => { models = readGenerated(out, 'Sources/Models.swift'); });
+
+    it('receive struct does NOT have unkeyedContainer init(from decoder:)', () => {
+      const dpStart = models.indexOf('public struct DataPoint:');
+      const dpEnd = models.indexOf('\n}', dpStart) + 2;
+      const dpBlock = models.slice(dpStart, dpEnd);
+      assert.ok(!dpBlock.includes('unkeyedContainer'));
+      assert.ok(!dpBlock.includes('UnkeyedDecodingContainer'));
+    });
+
+    it('send struct does NOT have unkeyedContainer decode', () => {
+      const subStart = models.indexOf('public struct Subscribe:');
+      const subEnd = models.indexOf('\n}', subStart) + 2;
+      const subBlock = models.slice(subStart, subEnd);
+      assert.ok(!subBlock.includes('unkeyedContainer'));
+      assert.ok(!subBlock.includes('UnkeyedDecodingContainer'));
+    });
+  });
+
+  describe('MessageEnums.swift — map-format decoding (default)', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('IncomingMessage uses keyed TypeKey for discriminator', () => {
+      assert.ok(msgEnums.includes('TypeKey'));
+      assert.ok(msgEnums.includes('container(keyedBy:'));
+    });
+
+    it('IncomingMessage does NOT use unkeyedContainer', () => {
+      assert.ok(!msgEnums.includes('unkeyedContainer'));
+    });
+
+    it('IncomingMessage dispatches via full decoder init', () => {
+      assert.ok(msgEnums.includes('DataPoint(from: decoder)'));
+      assert.ok(!msgEnums.includes('DataPoint(from: &container)'));
+    });
+
+    it('OutgoingMessage still uses keyed encoding', () => {
+      assert.ok(msgEnums.includes('try value.encode(to: encoder)'));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// msgpack with msgpackFormat=array
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('msgpack spec (serialization=msgpack, msgpackFormat=array)', () => {
+  let out;
+
+  before(() => {
+    out = generate('msgpack.asyncapi.yaml', { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' });
+  });
 
   describe('Models.swift — array-format decoding', () => {
     let models;
@@ -403,7 +459,7 @@ describe('msgpack spec (serialization=msgpack)', () => {
       assert.ok(msgEnums.includes('container.decode(String.self)'));
     });
 
-    it('IncomingMessage does NOT use keyed TypeKey for msgpack', () => {
+    it('IncomingMessage does NOT use keyed TypeKey for msgpack array', () => {
       assert.ok(!msgEnums.includes('TypeKey'));
       assert.ok(!msgEnums.includes('container(keyedBy:'));
     });
@@ -600,6 +656,32 @@ describe('combined params (msgpack + prefix + no reconnect)', () => {
     const client = readGenerated(out, 'Sources/WebSocketClient.swift');
     assert.ok(client.includes('public actor XYZWebSocketClient'));
     assert.ok(client.includes('XYZMessagePackSerializer()'));
+  });
+
+  it('defaults to map-format keyed decoding in Models (no unkeyedContainer)', () => {
+    const models = readGenerated(out, 'Sources/Models.swift');
+    assert.ok(models.includes('public struct XYZDataPoint:'));
+    assert.ok(!models.includes('UnkeyedDecodingContainer'));
+  });
+
+  it('defaults to keyed dispatch in IncomingMessage', () => {
+    const msgEnums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(msgEnums.includes('XYZDataPoint(from: decoder)'));
+    assert.ok(!msgEnums.includes('XYZDataPoint(from: &container)'));
+  });
+});
+
+describe('combined params (msgpack array + prefix + no reconnect)', () => {
+  let out;
+
+  before(() => {
+    out = generate('msgpack.asyncapi.yaml', {
+      server: 'local',
+      serialization: 'msgpack',
+      msgpackFormat: 'array',
+      typePrefix: 'XYZ',
+      reconnect: 'false',
+    });
   });
 
   it('has prefixed array-format container init in Models', () => {

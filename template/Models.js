@@ -143,18 +143,19 @@ function renderStruct(swiftName, properties, description, options = {}) {
 function Models({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
   const useMsgpack = params?.serialization === 'msgpack';
+  const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
   const messages = extractMessages(asyncapi);
   const schemas = extractSchemas(asyncapi);
   const enumDefs = extractEnums(asyncapi);
   const renderedStructs = [];
   const generatedNames = new Set();
 
-  // Collect names of schemas that need array-format decoding (msgpack receive)
-  const receiveSchemaNames = useMsgpack ? collectReceiveSchemaNames(asyncapi) : new Set();
+  // Collect names of schemas that need array-format decoding (msgpack array receive)
+  const receiveSchemaNames = msgpackArray ? collectReceiveSchemaNames(asyncapi) : new Set();
 
   // Receive messages with object payloads also need the container init
   const receiveMessageNames = new Set();
-  if (useMsgpack) {
+  if (msgpackArray) {
     for (const msg of messages) {
       if (msg.direction === 'receive' && msg.hasObjectPayload) {
         receiveMessageNames.add(msg.swiftName);

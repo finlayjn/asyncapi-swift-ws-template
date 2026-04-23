@@ -7,6 +7,7 @@ const { extractMessages } = require('../helpers/schema');
 function MessageEnums({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
   const useMsgpack = params?.serialization === 'msgpack';
+  const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
   const allMessages = extractMessages(asyncapi);
 
   const sendMessages = allMessages.filter(m => m.direction === 'send');
@@ -90,7 +91,7 @@ function MessageEnums({ asyncapi, params }) {
       .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join('');
 
-    if (useMsgpack && objectReceive.length > 0) {
+    if (msgpackArray && objectReceive.length > 0) {
       // ── Msgpack array-format decoding ──
       // Server sends events as positional arrays, not keyed maps.
       // Decode discriminator (first element) via unkeyedContainer, then

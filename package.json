@@ -33,6 +33,10 @@
         "description": "Wire serialization format: 'json' or 'msgpack'.",
         "default": "json"
       },
+      "msgpackFormat": {
+        "description": "Wire layout for msgpack messages: 'map' (keyed dictionaries) or 'array' (positional). Only applies when serialization=msgpack.",
+        "default": "map"
+      },
       "reconnect": {
         "description": "Generate automatic reconnection logic. 'true' or 'false'.",
         "default": "true"
