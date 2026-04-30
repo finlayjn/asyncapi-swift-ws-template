@@ -1,7 +1,7 @@
 // template/index.js — Main entry point for the AsyncAPI generator template
 // Returns all generated files as React <File> components
 
-const { setTypePrefix } = require('../helpers/swift');
+const { setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
 const PackageSwift = require('./PackageSwift');
 const Models = require('./Models');
 const Enums = require('./Enums');
@@ -13,6 +13,7 @@ function Index({ asyncapi, params, originalAsyncAPI }) {
   // Configure type prefix before any rendering
   const prefix = params.typePrefix || '';
   setTypePrefix(prefix);
+  setAllowNameCollisions(params?.allowNameCollisions);
 
   return [
     <PackageSwift key="package" asyncapi={asyncapi} params={params} />,

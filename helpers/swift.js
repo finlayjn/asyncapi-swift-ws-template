@@ -1,5 +1,25 @@
 // helpers/swift.js — Swift naming and type-mapping utilities
 
+let _generationWarnings = [];
+
+function addWarning(msg) { _generationWarnings.push(msg); }
+function getWarnings() { return _generationWarnings; }
+function clearWarnings() { _generationWarnings.length = 0; }
+
+let _allowNameCollisions = false;
+
+function setAllowNameCollisions(allow) { _allowNameCollisions = allow === true || allow === 'true'; }
+function getAllowNameCollisions() { return _allowNameCollisions; }
+
+/**
+ * Check whether a schema ID is parser-generated anonymous.
+ * The parser v3 uses `<anonymous-schema-N>` format.
+ */
+function isAnonymousSchema(id) {
+  if (!id) return true;
+  return /^(<anonymous-schema-\d+>|AnonymousSchema\d+)$/i.test(id);
+}
+
 let _typePrefix = '';
 
 /**
@@ -103,19 +123,43 @@ function escapeSwiftKeyword(name) {
 
 /**
  * Map a JSON Schema property to a Swift type string.
- * @param {object} prop - JSON Schema property object
+ * @param {object} prop - JSON Schema property object (from schemaToPlain)
  * @param {boolean} isRequired - whether the property is required
  * @param {string} [parentName] - parent type name for nested type generation
+ * @param {Map} [inlineStructMap] - inline struct registry (shapeKey → { swiftName })
  * @returns {string} Swift type string
  */
-function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '') {
-  if (!prop) return 'AnyCodable';
+function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineStructMap = null) {
+  if (!prop) {
+    addWarning(`[warn] Null schema for ${parentName || 'unknown'}, using JSONValue`);
+    return _prefixed('JSONValue');
+  }
 
   // Handle $ref
   if (prop.$ref) {
     const refName = prop.$ref.split('/').pop();
     const typeName = toSwiftTypeName(refName);
     return isRequired ? typeName : typeName + '?';
+  }
+
+  // Handle anyOf / oneOf — special case: one real type + null = optional
+  for (const keyword of ['anyOf', 'oneOf']) {
+    if (prop[keyword] && Array.isArray(prop[keyword]) && prop[keyword].length > 0) {
+      const variants = prop[keyword];
+      const nonNull = variants.filter(v => v.type !== 'null');
+      const hasNull = variants.some(v => v.type === 'null');
+
+      if (nonNull.length === 1) {
+        // Single type + null → that type as optional
+        const resolved = jsonSchemaTypeToSwift(nonNull[0], true, parentName, inlineStructMap);
+        return (hasNull || !isRequired) ? resolved.replace(/\?$/, '') + '?' : resolved;
+      }
+
+      // Genuine multi-type anyOf — not yet supported, warn and fall through
+      addWarning(`[warn] Multi-type ${keyword} not fully supported for ${parentName || 'unknown'}, using JSONValue`);
+      const fallback = _prefixed('JSONValue');
+      return (hasNull || !isRequired) ? fallback + '?' : fallback;
+    }
   }
 
   let swiftType;
@@ -134,6 +178,7 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '') {
       case 'integer':
         if (prop.format === 'int64') swiftType = 'Int64';
         else if (prop.format === 'uint16') swiftType = 'UInt16';
+        else if (prop.format === 'uint64') swiftType = 'UInt64';
         else swiftType = 'Int';
         break;
       case 'number':
@@ -145,36 +190,43 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '') {
       case 'array':
         if (prop.items) {
           // If the items has a real named schema id (resolved $ref, not anonymous), use that type
-          if (prop.items._schemaId && !prop.items._schemaId.startsWith('AnonymousSchema') && prop.items.type === 'object') {
+          if (prop.items._schemaId && !isAnonymousSchema(prop.items._schemaId) && prop.items.type === 'object') {
             swiftType = `[${toSwiftTypeName(prop.items._schemaId)}]`;
+          } else if (prop.items.type === 'object' && prop.items.properties && isAnonymousSchema(prop.items._schemaId)) {
+            // Inline anonymous object in array — look up in inline struct map
+            const resolved = _resolveInlineObject(prop.items, parentName, inlineStructMap);
+            swiftType = `[${resolved}]`;
           } else if (prop.items.type === 'array') {
             // Array of arrays (e.g. orderbook levels [[String]])
-            const innerType = jsonSchemaTypeToSwift(prop.items, true, parentName);
+            const innerType = jsonSchemaTypeToSwift(prop.items, true, parentName, inlineStructMap);
             swiftType = `[${innerType}]`;
           } else if (prop.items.$ref) {
             const refName = prop.items.$ref.split('/').pop();
             swiftType = `[${toSwiftTypeName(refName)}]`;
           } else {
-            const itemType = jsonSchemaTypeToSwift(prop.items, true, parentName);
+            const itemType = jsonSchemaTypeToSwift(prop.items, true, parentName, inlineStructMap);
             swiftType = `[${itemType}]`;
           }
         } else {
-          swiftType = '[AnyCodable]';
+          addWarning(`[warn] Array with no items schema for ${parentName || 'unknown'}, using [JSONValue]`);
+          swiftType = `[${_prefixed('JSONValue')}]`;
         }
         break;
       case 'object':
-        if (prop._schemaId && !prop._schemaId.startsWith('AnonymousSchema')) {
+        if (prop._schemaId && !isAnonymousSchema(prop._schemaId)) {
           // Resolved $ref to a named schema
           swiftType = toSwiftTypeName(prop._schemaId);
         } else if (prop.properties) {
-          // Nested inline object — would need a nested struct
-          swiftType = parentName ? toSwiftTypeName(parentName) : 'AnyCodable';
+          // Nested inline object — look up in inline struct map
+          swiftType = _resolveInlineObject(prop, parentName, inlineStructMap);
         } else {
-          swiftType = '[String: AnyCodable]';
+          addWarning(`[warn] Untyped object (no properties) for ${parentName || 'unknown'}, using [String: JSONValue]`);
+          swiftType = `[String: ${_prefixed('JSONValue')}]`;
         }
         break;
       default:
-        swiftType = 'AnyCodable';
+        addWarning(`[warn] Unknown/missing type for ${parentName || 'unknown'} (type=${prop.type}), using JSONValue`);
+        swiftType = _prefixed('JSONValue');
     }
   }
 
@@ -182,6 +234,32 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '') {
     return swiftType + '?';
   }
   return swiftType;
+}
+
+/**
+ * Resolve an inline anonymous object to its deduplicated Swift type name.
+ */
+function _resolveInlineObject(plainProp, parentName, inlineStructMap) {
+  if (inlineStructMap && plainProp.properties) {
+    // Build shape key to look up
+    const entries = Object.entries(plainProp.properties)
+      .map(([name, p]) => {
+        let t = p.type || 'unknown';
+        if (p.format) t += ':' + p.format;
+        if (p.nullable) t += '?';
+        return `${name}:${t}`;
+      })
+      .sort();
+    const key = entries.join('|');
+    const found = inlineStructMap.get(key);
+    if (found) return found.swiftName;
+  }
+  // Fallback: derive from parent name
+  return parentName ? toSwiftTypeName(parentName) : _prefixed('JSONValue');
+}
+
+function _prefixed(name) {
+  return _typePrefix ? _typePrefix + name : name;
 }
 
 /**
@@ -260,5 +338,11 @@ module.exports = {
   setTypePrefix,
   getTypePrefix,
   prefixedName,
+  isAnonymousSchema,
+  addWarning,
+  getWarnings,
+  clearWarnings,
+  setAllowNameCollisions,
+  getAllowNameCollisions,
   SWIFT_KEYWORDS,
 };

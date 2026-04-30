@@ -1,7 +1,7 @@
 // helpers/schema.js — Extract messages, schemas, and enums from parsed AsyncAPI v3 document
 // Parser v3 API: collections have .all() returning arrays, schemas have method-based accessors
 
-const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix } = require('./swift');
+const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions } = require('./swift');
 
 /**
  * Apply the current type prefix to a base name.
@@ -25,7 +25,7 @@ function call(obj, method) {
  */
 function extractMessages(asyncapi) {
   const messages = [];
-  const seen = new Set();
+  const seen = new Map(); // messageName → { action, messageId }
 
   const operations = asyncapi.operations();
   if (!operations) return messages;
@@ -39,8 +39,77 @@ function extractMessages(asyncapi) {
 
     for (const message of allMsgs) {
       const messageName = message.name() || message.id();
-      if (!messageName || seen.has(messageName)) continue;
-      seen.add(messageName);
+      const messageId = message.id() || messageName;
+      if (!messageName) continue;
+
+      if (seen.has(messageName)) {
+        const prev = seen.get(messageName);
+        // Same message referenced from multiple operations — safe to skip
+        if (prev.messageId === messageId) continue;
+
+        // Different messages sharing the same name — payload collision
+        if (!getAllowNameCollisions()) {
+          throw new Error(
+            `Message name collision: "${messageName}" is used by both ` +
+            `"${prev.messageId}" (${prev.action}) and "${messageId}" (${action}) ` +
+            `with different payloads. This will cause incorrect decoding at runtime. ` +
+            `Fix the spec by giving each message a unique "name", or pass ` +
+            `-p allowNameCollisions=true to disambiguate using component keys.`
+          );
+        }
+
+        // Bypass: disambiguate by using the component message key (messageId)
+        addWarning(
+          `[warn] Message name collision: "${messageName}" is used by both ` +
+          `"${prev.messageId}" (${prev.action}) and "${messageId}" (${action}). ` +
+          `Disambiguating: second message will use struct name derived from "${messageId}".`
+        );
+        // Don't skip — fall through to add with disambiguated name
+        // Override messageName with the unique component key for this message
+        const disambiguatedName = messageId;
+        seen.set(disambiguatedName, { action, messageId });
+
+        const payload = message.payload();
+        let constTypeValue = null;
+        let discriminatorKey = null;
+        let hasObjectPayload = false;
+
+        if (payload && typeof payload.properties === 'function') {
+          const props = payload.properties();
+          if (props && typeof props === 'object' && Object.keys(props).length > 0) {
+            hasObjectPayload = true;
+            for (const [key, propSchema] of Object.entries(props)) {
+              const c = call(propSchema, 'const');
+              if (c !== undefined && c !== null) {
+                discriminatorKey = key;
+                constTypeValue = String(c);
+                break;
+              }
+            }
+          }
+        }
+
+        if (!hasObjectPayload && payload) {
+          const c = call(payload, 'const');
+          if (c !== undefined && c !== null) {
+            constTypeValue = String(c);
+          }
+        }
+
+        messages.push({
+          messageName: disambiguatedName,
+          swiftName: toSwiftTypeName(disambiguatedName),
+          direction: action,
+          payload,
+          constTypeValue,
+          discriminatorKey,
+          hasObjectPayload,
+          title: (typeof message.title === 'function' ? message.title() : '') || '',
+          summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
+        });
+        continue;
+      }
+      seen.set(messageName, { action, messageId });
 
       const payload = message.payload();
       let constTypeValue = null;
@@ -163,6 +232,16 @@ function schemaToPlain(schema) {
     if (items) plain.items = schemaToPlain(items);
   }
 
+  // Handle anyOf / oneOf / allOf
+  for (const keyword of ['anyOf', 'oneOf', 'allOf']) {
+    if (typeof schema[keyword] === 'function') {
+      const variants = schema[keyword]();
+      if (Array.isArray(variants) && variants.length > 0) {
+        plain[keyword] = variants.map(v => schemaToPlain(v));
+      }
+    }
+  }
+
   // Handle prefixItems (JSON Schema tuple arrays, e.g. TupleArray: [String, String])
   // The parser doesn't expose prefixItems() as a method, so read from raw JSON.
   if (!plain.items) {
@@ -261,9 +340,10 @@ function scanForEnums(schema, contextName, enumMap, nameCount) {
  * @param {object} schema - Parsed schema model
  * @param {string} parentSwiftName - Parent type name for context
  * @param {Array} [enumDefs] - Extracted enum definitions from extractEnums() for correct type resolution
+ * @param {Map} [inlineStructMap] - Inline struct registry for resolving anonymous objects
  * Returns array of { name, swiftName, swiftType, isRequired, isConst, constVal, description, wireFormat }
  */
-function buildPropertyList(schema, parentSwiftName, enumDefs) {
+function buildPropertyList(schema, parentSwiftName, enumDefs, inlineStructMap) {
   if (!schema || typeof schema.properties !== 'function') return [];
 
   const props = schema.properties();
@@ -285,7 +365,7 @@ function buildPropertyList(schema, parentSwiftName, enumDefs) {
       swiftType = enumDef ? enumDef.swiftName : toSwiftTypeName(propName);
       if (!isRequired || plain.nullable) swiftType += '?';
     } else {
-      swiftType = jsonSchemaTypeToSwift(plain, isRequired, parentSwiftName + toSwiftTypeName(propName));
+      swiftType = jsonSchemaTypeToSwift(plain, isRequired, parentSwiftName + toSwiftTypeName(propName), inlineStructMap);
     }
 
     result.push({
@@ -354,7 +434,7 @@ function _collectNestedSchemaNames(schema, names) {
     const propType = call(propSchema, 'type');
     const id = call(propSchema, 'id');
 
-    if (propType === 'object' && id && !id.startsWith('AnonymousSchema')) {
+    if (propType === 'object' && id && !isAnonymousSchema(id)) {
       const swiftName = toSwiftTypeName(id);
       if (!names.has(swiftName)) {
         names.add(swiftName);
@@ -367,7 +447,7 @@ function _collectNestedSchemaNames(schema, names) {
       if (items) {
         const itemType = call(items, 'type');
         const itemId = call(items, 'id');
-        if (itemType === 'object' && itemId && !itemId.startsWith('AnonymousSchema')) {
+        if (itemType === 'object' && itemId && !isAnonymousSchema(itemId)) {
           const swiftName = toSwiftTypeName(itemId);
           if (!names.has(swiftName)) {
             names.add(swiftName);
@@ -379,6 +459,116 @@ function _collectNestedSchemaNames(schema, names) {
   }
 }
 
+/**
+ * Compute a shape key for an inline object schema (sorted property names + types).
+ * Used to deduplicate identical anonymous structs.
+ */
+function _shapeKey(plainSchema) {
+  if (!plainSchema || !plainSchema.properties) return null;
+  const entries = Object.entries(plainSchema.properties)
+    .map(([name, prop]) => {
+      let t = prop.type || 'unknown';
+      if (prop.format) t += ':' + prop.format;
+      if (prop.nullable) t += '?';
+      return `${name}:${t}`;
+    })
+    .sort();
+  return entries.join('|');
+}
+
+/**
+ * Extract inline anonymous object schemas from all messages, deduplicated by shape.
+ * Returns a Map<shapeKey, { swiftName, plainSchema, schema }> for structs that
+ * need to be generated.
+ *
+ * Also mutates the inline struct registry so that `jsonSchemaTypeToSwift` can
+ * resolve anonymous object types by their parent-derived name.
+ */
+function extractInlineStructs(asyncapi) {
+  const structMap = new Map(); // shapeKey → { swiftName, plainSchema, schema }
+  const messages = extractMessages(asyncapi);
+  const schemas = extractSchemas(asyncapi);
+
+  function scanSchema(schema, parentBaseName) {
+    if (!schema || typeof schema.properties !== 'function') return;
+    const props = schema.properties();
+    if (!props) return;
+
+    for (const [propName, propSchema] of Object.entries(props)) {
+      const propType = call(propSchema, 'type');
+      const id = call(propSchema, 'id');
+
+      // Direct inline object
+      if (propType === 'object' && isAnonymousSchema(id)) {
+        _registerInlineObject(propSchema, propName, parentBaseName, structMap);
+      }
+
+      // Array of inline objects
+      if (propType === 'array' && typeof propSchema.items === 'function') {
+        const items = propSchema.items();
+        if (items) {
+          const itemType = call(items, 'type');
+          const itemId = call(items, 'id');
+          if (itemType === 'object' && isAnonymousSchema(itemId)) {
+            _registerInlineObject(items, propName, parentBaseName, structMap);
+          }
+        }
+      }
+
+      // anyOf/oneOf with an inline object variant (nullable pattern)
+      for (const keyword of ['anyOf', 'oneOf']) {
+        if (typeof propSchema[keyword] === 'function') {
+          const variants = propSchema[keyword]();
+          if (!Array.isArray(variants)) continue;
+          const nonNull = variants.filter(v => call(v, 'type') !== 'null');
+          for (const variant of nonNull) {
+            const vType = call(variant, 'type');
+            const vId = call(variant, 'id');
+            if (vType === 'object' && isAnonymousSchema(vId)) {
+              _registerInlineObject(variant, propName, parentBaseName, structMap);
+            }
+          }
+        }
+      }
+
+      // Recurse into nested objects
+      if (propType === 'object' && typeof propSchema.properties === 'function') {
+        scanSchema(propSchema, parentBaseName + toSwiftBaseTypeName(propName));
+      }
+    }
+  }
+
+  function _registerInlineObject(schema, propName, parentBaseName, map) {
+    const plain = schemaToPlain(schema);
+    const key = _shapeKey(plain);
+    if (!key) return;
+
+    if (!map.has(key)) {
+      // Derive name from property name; if collision with parent, prefix with parent
+      const baseName = toSwiftBaseTypeName(propName);
+      const existingNames = new Set(Array.from(map.values()).map(v => v.baseName));
+      const finalBase = existingNames.has(baseName) ? parentBaseName + baseName : baseName;
+      map.set(key, {
+        baseName: finalBase,
+        swiftName: _applyPrefix(finalBase),
+        plainSchema: plain,
+        schema,
+      });
+    }
+  }
+
+  for (const msg of messages) {
+    if (!msg.payload) continue;
+    scanSchema(msg.payload, toSwiftBaseTypeName(msg.messageName || ''));
+  }
+
+  for (const sch of schemas) {
+    scanSchema(sch.schema, toSwiftBaseTypeName(sch.schemaName || ''));
+  }
+
+  return structMap;
+}
+
 module.exports = {
   extractMessages,
   extractSchemas,
@@ -388,4 +578,5 @@ module.exports = {
   buildServerURL,
   scanForEnums,
   collectReceiveSchemaNames,
+  extractInlineStructs,
 };

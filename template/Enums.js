@@ -1,11 +1,12 @@
 // template/Enums.js — Generates shared Swift enum types from enum properties
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftEnumCase, setTypePrefix } = require('../helpers/swift');
+const { toSwiftEnumCase, setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
 const { extractEnums } = require('../helpers/schema');
 
 function Enums({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
+  setAllowNameCollisions(params?.allowNameCollisions);
   const enums = extractEnums(asyncapi);
   if (enums.length === 0) return null;
 

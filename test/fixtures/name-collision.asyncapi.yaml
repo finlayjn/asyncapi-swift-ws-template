@@ -1,0 +1,72 @@
+asyncapi: 3.0.0
+info:
+  title: Name Collision Test WS
+  version: 1.0.0
+  description: Tests name collision detection and disambiguation.
+
+servers:
+  local:
+    host: localhost:9200
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      submitOrder:
+        $ref: "#/components/messages/SubmitOrder"
+      submitOrderResponse:
+        $ref: "#/components/messages/SubmitOrderResponse"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/submitOrder"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/submitOrderResponse"
+
+components:
+  messages:
+    SubmitOrder:
+      name: submit_order
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: submit_order
+          symbol:
+            type: string
+          quantity:
+            type: number
+        required:
+          - type
+          - symbol
+          - quantity
+
+    SubmitOrderResponse:
+      # Collision: same name as SubmitOrder
+      name: submit_order
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: submit_order_ack
+          orderId:
+            type: string
+          status:
+            type: string
+        required:
+          - type
+          - orderId
+          - status

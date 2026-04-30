@@ -1,0 +1,130 @@
+asyncapi: 3.0.0
+info:
+  title: AnyOf Inline Test WS
+  version: 1.0.0
+  description: Tests anyOf nullable patterns, inline anonymous objects, and JSONValue fallback.
+
+servers:
+  local:
+    host: localhost:9100
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      placeOrder:
+        $ref: "#/components/messages/PlaceOrder"
+      orderStatus:
+        $ref: "#/components/messages/OrderStatus"
+      snapshot:
+        $ref: "#/components/messages/Snapshot"
+
+operations:
+  send:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/placeOrder"
+
+  receive:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/orderStatus"
+      - $ref: "#/channels/main/messages/snapshot"
+
+components:
+  messages:
+    PlaceOrder:
+      name: place_order
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: place_order
+          symbol:
+            type: string
+          price:
+            type: number
+          quantity:
+            # anyOf with one real type + null = optional
+            anyOf:
+              - type: object
+                properties:
+                  value:
+                    type: number
+                  unit:
+                    type: string
+                required:
+                  - value
+                  - unit
+              - type: "null"
+        required:
+          - type
+          - symbol
+          - price
+
+    OrderStatus:
+      name: order_status
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: order_status
+          orderId:
+            type: string
+          status:
+            type: string
+          fills:
+            type: array
+            items:
+              type: object
+              properties:
+                price:
+                  type: number
+                size:
+                  type: number
+                timestamp:
+                  type: integer
+              required:
+                - price
+                - size
+                - timestamp
+          metadata:
+            # multi-type anyOf = JSONValue fallback
+            anyOf:
+              - type: string
+              - type: integer
+              - type: object
+                properties:
+                  key:
+                    type: string
+        required:
+          - type
+          - orderId
+          - status
+
+    Snapshot:
+      name: snapshot
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: snapshot
+          data:
+            type: array
+            items:
+              type: string
+          extra:
+            # untyped object → [String: JSONValue]
+            type: object
+        required:
+          - type
+          - data

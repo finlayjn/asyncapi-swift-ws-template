@@ -1,8 +1,8 @@
 // template/Models.js — Generates Swift struct for each message payload and component schema
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix } = require('../helpers/swift');
-const { extractMessages, extractSchemas, extractEnums, buildPropertyList, collectReceiveSchemaNames } = require('../helpers/schema');
+const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix, setAllowNameCollisions, getWarnings, clearWarnings, prefixedName } = require('../helpers/swift');
+const { extractMessages, extractSchemas, extractEnums, buildPropertyList, collectReceiveSchemaNames, extractInlineStructs } = require('../helpers/schema');
 
 /**
  * Sort properties by their position in the required array, then remaining in original order.
@@ -140,13 +140,68 @@ function renderStruct(swiftName, properties, description, options = {}) {
   return lines.join('\n');
 }
 
+/**
+ * Render the JSONValue enum — a Codable catch-all for untyped schemas.
+ */
+function renderJSONValue(prefix) {
+  const name = prefix ? prefix + 'JSONValue' : 'JSONValue';
+  return `public enum ${name}: Codable, Sendable, Hashable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case object([String: ${name}])
+    case array([${name}])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let v = try? container.decode(Bool.self) {
+            self = .bool(v)
+        } else if let v = try? container.decode(Int.self) {
+            self = .int(v)
+        } else if let v = try? container.decode(Double.self) {
+            self = .double(v)
+        } else if let v = try? container.decode(String.self) {
+            self = .string(v)
+        } else if let v = try? container.decode([String: ${name}].self) {
+            self = .object(v)
+        } else if let v = try? container.decode([${name}].self) {
+            self = .array(v)
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Cannot decode JSONValue")
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try container.encode(v)
+        case .int(let v): try container.encode(v)
+        case .double(let v): try container.encode(v)
+        case .bool(let v): try container.encode(v)
+        case .object(let v): try container.encode(v)
+        case .array(let v): try container.encode(v)
+        case .null: try container.encodeNil()
+        }
+    }
+}`;
+}
+
 function Models({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
+  setAllowNameCollisions(params?.allowNameCollisions);
+  clearWarnings();
   const useMsgpack = params?.serialization === 'msgpack';
   const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
   const messages = extractMessages(asyncapi);
   const schemas = extractSchemas(asyncapi);
   const enumDefs = extractEnums(asyncapi);
+  const inlineStructMap = extractInlineStructs(asyncapi);
   const renderedStructs = [];
   const generatedNames = new Set();
 
@@ -163,13 +218,28 @@ function Models({ asyncapi, params }) {
     }
   }
 
+  // Generate structs for inline anonymous objects (deduplicated)
+  for (const [, entry] of inlineStructMap) {
+    if (generatedNames.has(entry.swiftName)) continue;
+    generatedNames.add(entry.swiftName);
+
+    const properties = buildPropertyList(entry.schema, entry.swiftName, enumDefs, inlineStructMap);
+    if (properties.length === 0) continue;
+
+    const needsUnkeyed = receiveSchemaNames.has(entry.swiftName);
+    renderedStructs.push(renderStruct(entry.swiftName, properties, '', {
+      unkeyedDecode: needsUnkeyed,
+      containerInit: false,
+    }));
+  }
+
   // Generate structs for each message payload
   for (const msg of messages) {
     if (!msg.payload) continue;
     if (generatedNames.has(msg.swiftName)) continue;
     generatedNames.add(msg.swiftName);
 
-    const properties = buildPropertyList(msg.payload, msg.swiftName, enumDefs);
+    const properties = buildPropertyList(msg.payload, msg.swiftName, enumDefs, inlineStructMap);
     if (properties.length === 0) continue;
 
     const desc = msg.title || msg.summary || '';
@@ -186,7 +256,7 @@ function Models({ asyncapi, params }) {
     if (generatedNames.has(sch.swiftName)) continue;
     generatedNames.add(sch.swiftName);
 
-    const properties = buildPropertyList(sch.schema, sch.swiftName, enumDefs);
+    const properties = buildPropertyList(sch.schema, sch.swiftName, enumDefs, inlineStructMap);
     if (properties.length === 0) continue;
 
     const needsUnkeyed = receiveSchemaNames.has(sch.swiftName);
@@ -196,14 +266,29 @@ function Models({ asyncapi, params }) {
     }));
   }
 
+  // Check if JSONValue is referenced by any generated struct
+  const allCode = renderedStructs.join('\n');
+  const jsonValueName = prefixedName('JSONValue');
+  const needsJSONValue = allCode.includes(jsonValueName);
+
+  // Print any generation warnings
+  const warnings = getWarnings();
+  if (warnings.length > 0) {
+    for (const w of warnings) {
+      console.warn(w);
+    }
+  }
+
   if (renderedStructs.length === 0) return null;
+
+  const jsonValueBlock = needsJSONValue ? '\n\n' + renderJSONValue(params?.typePrefix || '') : '';
 
   return (
     <File name="Sources/Models.swift">
       <Text>{`// Generated by asyncapi-swift-ws-template — do not edit
 import Foundation
 
-${renderedStructs.join('\n\n')}`}</Text>
+${renderedStructs.join('\n\n')}${jsonValueBlock}`}</Text>
     </File>
   );
 }

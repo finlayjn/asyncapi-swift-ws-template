@@ -100,8 +100,42 @@ function cleanOutput() {
   }
 }
 
+/**
+ * Attempt to generate and return { success, error, outputDir }.
+ * Does NOT throw on generation failure — returns the error message instead.
+ */
+function generateResult(fixtureName, params = {}) {
+  const specPath = path.join(FIXTURES_DIR, fixtureName);
+  if (!fs.existsSync(specPath)) {
+    throw new Error(`Fixture not found: ${specPath}`);
+  }
+
+  const paramStr = Object.entries(params)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('_');
+  const dirName = fixtureName.replace(/\.(asyncapi\.)?ya?ml$/, '') + (paramStr ? `_${paramStr}` : '');
+  const outputDir = path.join(OUTPUT_BASE, dirName);
+
+  const paramArgs = Object.entries(params)
+    .map(([k, v]) => `-p ${k}=${v}`)
+    .join(' ');
+
+  const cmd = `asyncapi generate fromTemplate "${specPath}" "${TEMPLATE_DIR}" -o "${outputDir}" ${paramArgs} --force-write`;
+
+  try {
+    execSync(cmd, { stdio: 'pipe', timeout: 30000 });
+    return { success: true, error: null, outputDir };
+  } catch (err) {
+    const stderr = err.stderr ? err.stderr.toString() : '';
+    const stdout = err.stdout ? err.stdout.toString() : '';
+    return { success: false, error: stderr + stdout, outputDir };
+  }
+}
+
 module.exports = {
   generate,
+  generateResult,
   readGenerated,
   generatedFileExists,
   listGeneratedSwiftFiles,
