@@ -11,6 +11,28 @@ let _allowNameCollisions = false;
 function setAllowNameCollisions(allow) { _allowNameCollisions = allow === true || allow === 'true'; }
 function getAllowNameCollisions() { return _allowNameCollisions; }
 
+let _perspective = 'server';
+
+/**
+ * Set the spec perspective: 'server' (default, standard AsyncAPI v3) or 'client'.
+ * In server perspective, action: send = server sends (client receives).
+ * In client perspective, action: send = client sends (client sends).
+ */
+function setPerspective(perspective) { _perspective = perspective === 'client' ? 'client' : 'server'; }
+function getPerspective() { return _perspective; }
+
+/**
+ * Map a raw AsyncAPI operation action to the client direction.
+ * Returns 'outgoing' (client sends) or 'incoming' (client receives).
+ */
+function clientDirection(action) {
+  if (_perspective === 'client') {
+    return action === 'send' ? 'outgoing' : 'incoming';
+  }
+  // server perspective (default): send = server sends → client receives
+  return action === 'send' ? 'incoming' : 'outgoing';
+}
+
 /**
  * Check whether a schema ID is parser-generated anonymous.
  * The parser v3 uses `<anonymous-schema-N>` format.
@@ -344,5 +366,8 @@ module.exports = {
   clearWarnings,
   setAllowNameCollisions,
   getAllowNameCollisions,
+  setPerspective,
+  getPerspective,
+  clientDirection,
   SWIFT_KEYWORDS,
 };

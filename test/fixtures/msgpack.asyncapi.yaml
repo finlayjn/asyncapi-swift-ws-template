@@ -20,15 +20,15 @@ channels:
         $ref: "#/components/messages/DataPoint"
 
 operations:
-  send:
-    action: send
+  receiveFromClient:
+    action: receive
     channel:
       $ref: "#/channels/main"
     messages:
       - $ref: "#/channels/main/messages/subscribe"
 
-  receive:
-    action: receive
+  sendToClient:
+    action: send
     channel:
       $ref: "#/channels/main"
     messages:

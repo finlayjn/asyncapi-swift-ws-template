@@ -1,7 +1,7 @@
 // template/Models.js — Generates Swift struct for each message payload and component schema
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix, setAllowNameCollisions, getWarnings, clearWarnings, prefixedName } = require('../helpers/swift');
+const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix, setAllowNameCollisions, setPerspective, clientDirection, getWarnings, clearWarnings, prefixedName } = require('../helpers/swift');
 const { extractMessages, extractSchemas, extractEnums, buildPropertyList, collectReceiveSchemaNames, extractInlineStructs } = require('../helpers/schema');
 
 /**
@@ -195,6 +195,7 @@ function renderJSONValue(prefix) {
 function Models({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
   setAllowNameCollisions(params?.allowNameCollisions);
+  setPerspective(params?.perspective);
   clearWarnings();
   const useMsgpack = params?.serialization === 'msgpack';
   const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
@@ -212,7 +213,7 @@ function Models({ asyncapi, params }) {
   const receiveMessageNames = new Set();
   if (msgpackArray) {
     for (const msg of messages) {
-      if (msg.direction === 'receive' && msg.hasObjectPayload) {
+      if (clientDirection(msg.direction) === 'incoming' && msg.hasObjectPayload) {
         receiveMessageNames.add(msg.swiftName);
       }
     }

@@ -32,8 +32,8 @@ channels:
         $ref: "#/components/messages/Error"
 
 operations:
-  send:
-    action: send
+  receiveFromClient:
+    action: receive
     channel:
       $ref: "#/channels/main"
     messages:
@@ -41,8 +41,8 @@ operations:
       - $ref: "#/channels/main/messages/unsubscribe"
       - $ref: "#/channels/main/messages/ping"
 
-  receive:
-    action: receive
+  sendToClient:
+    action: send
     channel:
       $ref: "#/channels/main"
     messages:

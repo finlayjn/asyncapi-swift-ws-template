@@ -1,7 +1,7 @@
 // helpers/schema.js — Extract messages, schemas, and enums from parsed AsyncAPI v3 document
 // Parser v3 API: collections have .all() returning arrays, schemas have method-based accessors
 
-const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions } = require('./swift');
+const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection } = require('./swift');
 
 /**
  * Apply the current type prefix to a base name.
@@ -414,7 +414,7 @@ function collectReceiveSchemaNames(asyncapi) {
   const messages = extractMessages(asyncapi);
 
   for (const msg of messages) {
-    if (msg.direction !== 'receive') continue;
+    if (clientDirection(msg.direction) !== 'incoming') continue;
     if (!msg.payload) continue;
     if (!msg.hasObjectPayload) continue;
     names.add(msg.swiftName);

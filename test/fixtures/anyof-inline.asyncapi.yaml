@@ -22,15 +22,15 @@ channels:
         $ref: "#/components/messages/Snapshot"
 
 operations:
-  send:
-    action: send
+  receiveFromClient:
+    action: receive
     channel:
       $ref: "#/channels/main"
     messages:
       - $ref: "#/channels/main/messages/placeOrder"
 
-  receive:
-    action: receive
+  sendToClient:
+    action: send
     channel:
       $ref: "#/channels/main"
     messages:

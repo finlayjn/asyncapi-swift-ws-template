@@ -383,3 +383,115 @@ describe('swift compilation — name-collision with bypass + prefix', () => {
     assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Perspective parameter — server (default) vs client
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('perspective parameter — server perspective (default)', () => {
+  let out;
+
+  before(() => {
+    // basic.asyncapi.yaml is now written from the server perspective (standard AsyncAPI v3):
+    // action: send = server sends to client (IncomingMessage)
+    // action: receive = server receives from client (OutgoingMessage)
+    out = generate('basic.asyncapi.yaml', { server: 'local' });
+  });
+
+  it('maps server send messages to IncomingMessage', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    // pong, echoReply, error are in sendToClient (action: send) → client receives → IncomingMessage
+    assert.ok(enums.includes('public enum IncomingMessage: Sendable'));
+    assert.ok(enums.includes('case pong('));
+    assert.ok(enums.includes('case echoReply('));
+  });
+
+  it('maps server receive messages to OutgoingMessage', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    // ping, echo are in receiveFromClient (action: receive) → client sends → OutgoingMessage
+    assert.ok(enums.includes('public enum OutgoingMessage: Sendable'));
+    assert.ok(enums.includes('case ping('));
+    assert.ok(enums.includes('case echo('));
+  });
+
+  it('IncomingMessage has Decodable conformance', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('extension IncomingMessage: Decodable'));
+  });
+
+  it('OutgoingMessage has Encodable conformance', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('extension OutgoingMessage: Encodable'));
+  });
+});
+
+describe('perspective parameter — client perspective (explicit)', () => {
+  let out;
+
+  before(() => {
+    // client-perspective.asyncapi.yaml is written from client perspective:
+    // action: send = client sends (OutgoingMessage)
+    // action: receive = client receives (IncomingMessage)
+    out = generate('client-perspective.asyncapi.yaml', { server: 'local', perspective: 'client' });
+  });
+
+  it('maps client send messages to OutgoingMessage', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('public enum OutgoingMessage: Sendable'));
+    assert.ok(enums.includes('case ping('));
+    assert.ok(enums.includes('case echo('));
+  });
+
+  it('maps client receive messages to IncomingMessage', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('public enum IncomingMessage: Sendable'));
+    assert.ok(enums.includes('case pong('));
+    assert.ok(enums.includes('case echoReply('));
+  });
+
+  it('IncomingMessage has Decodable conformance', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('extension IncomingMessage: Decodable'));
+  });
+
+  it('OutgoingMessage has Encodable conformance', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    assert.ok(enums.includes('extension OutgoingMessage: Encodable'));
+  });
+
+  it('generates same Models regardless of perspective', () => {
+    const models = readGenerated(out, 'Sources/Models.swift');
+    assert.ok(models.includes('public struct Ping: Codable, Sendable'));
+    assert.ok(models.includes('public struct Pong: Codable, Sendable'));
+    assert.ok(models.includes('public struct Echo: Codable, Sendable'));
+    assert.ok(models.includes('public struct EchoReply: Codable, Sendable'));
+  });
+});
+
+describe('perspective parameter — wrong perspective inverts directions', () => {
+  let out;
+
+  before(() => {
+    // Use the server-perspective fixture but with perspective=client → directions will be inverted
+    out = generate('basic.asyncapi.yaml', { server: 'local', perspective: 'client' });
+  });
+
+  it('with client perspective on server spec, send becomes OutgoingMessage (wrong)', () => {
+    const enums = readGenerated(out, 'Sources/MessageEnums.swift');
+    // action: send (server sends pong/echoReply/error) treated as client sends → OutgoingMessage
+    assert.ok(enums.includes('public enum OutgoingMessage: Sendable'));
+    // These are server-sent messages but now appear in Outgoing due to wrong perspective
+    const outgoingSection = enums.slice(enums.indexOf('public enum OutgoingMessage'), enums.indexOf('extension OutgoingMessage'));
+    assert.ok(outgoingSection.includes('case pong('));
+  });
+});
+
+describe('swift compilation — client-perspective spec with perspective=client', () => {
+  let out;
+  before(() => { out = generate('client-perspective.asyncapi.yaml', { server: 'local', perspective: 'client' }); });
+
+  it('compiles without errors', () => {
+    const result = swiftBuild(out);
+    assert.ok(result.success, `swift build failed:\n${result.stdout}\n${result.stderr}`);
+  });
+});

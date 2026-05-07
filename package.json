@@ -52,6 +52,10 @@
       "allowNameCollisions": {
         "description": "When 'true', allow multiple messages to share the same 'name' field. Colliding messages are disambiguated using their component key (e.g. order_preview_response). Default is 'false', which treats collisions as a generation error.",
         "default": "false"
+      },
+      "perspective": {
+        "description": "Perspective from which the AsyncAPI spec is written: 'server' (default, standard AsyncAPI v3 — send means server-to-client) or 'client' (send means client-to-server).",
+        "default": "server"
       }
     }
   }

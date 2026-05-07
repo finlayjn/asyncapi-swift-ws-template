@@ -1,18 +1,19 @@
 // template/MessageEnums.js — Generates IncomingMessage and OutgoingMessage tagged enums
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftEnumCase, toSwiftPropertyName, prefixedName, setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
+const { toSwiftEnumCase, toSwiftPropertyName, prefixedName, setTypePrefix, setAllowNameCollisions, setPerspective, clientDirection } = require('../helpers/swift');
 const { extractMessages } = require('../helpers/schema');
 
 function MessageEnums({ asyncapi, params }) {
   setTypePrefix(params?.typePrefix);
   setAllowNameCollisions(params?.allowNameCollisions);
+  setPerspective(params?.perspective);
   const useMsgpack = params?.serialization === 'msgpack';
   const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
   const allMessages = extractMessages(asyncapi);
 
-  const sendMessages = allMessages.filter(m => m.direction === 'send');
-  const receiveMessages = allMessages.filter(m => m.direction === 'receive');
+  const sendMessages = allMessages.filter(m => clientDirection(m.direction) === 'outgoing');
+  const receiveMessages = allMessages.filter(m => clientDirection(m.direction) === 'incoming');
 
   const outgoingName = prefixedName('OutgoingMessage');
   const incomingName = prefixedName('IncomingMessage');

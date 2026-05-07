@@ -42,6 +42,10 @@ npm install -g @asyncapi/cli
 # Generate from a local template checkout
 asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient -p server=dev
 
+# With a client-perspective spec (non-standard AsyncAPI v3)
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+  -p server=dev -p perspective=client
+
 # With MessagePack serialization (keyed map decoding, the default)
 asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
   -p server=dev -p serialization=msgpack
@@ -73,6 +77,7 @@ cd ./MyClient && swift build
 | `reconnect` | no | `true` | Generate auto-reconnect logic with exponential backoff (`true` or `false`) |
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
 | `allowNameCollisions` | no | `"false"` | When `"true"`, allow multiple messages to share the same `name` field. Colliding messages are disambiguated using their component key (e.g. `order_preview_response`). Default is `"false"`, which treats collisions as a generation error. |
+| `perspective` | no | `"server"` | Perspective from which the AsyncAPI spec is written: `server` (default, standard AsyncAPI v3 — `action: send` means server-to-client) or `client` (`action: send` means client-to-server). |
 | `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
 
 ## Quick start (generated client)
@@ -224,8 +229,9 @@ Test fixtures live in `test/fixtures/` and cover:
 | `custom-discriminator.asyncapi.yaml` | Non-standard discriminator key (`event_type`), server `pathname`, plain string const payloads (`PING`/`PONG`), public init with const auto-assignment |
 | `anyof-inline.asyncapi.yaml` | `anyOf` nullable patterns (`[type, null]` → optional), multi-type `anyOf` → `JSONValue` fallback, inline anonymous objects in properties and array items, untyped object → `[String: JSONValue]`, conditional `JSONValue` generation |
 | `name-collision.asyncapi.yaml` | Name collision detection (two messages with same `name`, different payloads), hard error by default, `allowNameCollisions=true` bypass with component-key disambiguation |
+| `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
 
-Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, and all combinations thereof.
+Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), and all combinations thereof.
 
 ### Manual generation
 
