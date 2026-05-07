@@ -101,9 +101,26 @@ function MessageEnums({ asyncapi, params }) {
       lines.push('    public init(from decoder: Decoder) throws {');
 
       if (plainReceive.length > 0) {
-        lines.push('        // Try plain string messages first');
-        lines.push('        if let container = try? decoder.singleValueContainer(),');
-        lines.push('           let value = try? container.decode(String.self) {');
+        lines.push('        // Array-format discriminated decoding (msgpack)');
+        lines.push('        // Try unkeyed container first; plain string messages fall through to catch.');
+        lines.push('        do {');
+        lines.push('            var container = try decoder.unkeyedContainer()');
+        lines.push('            let type = try container.decode(String.self)');
+        lines.push('');
+        lines.push('            switch type {');
+        for (const msg of objectReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`            case "${constVal}":`);
+          lines.push(`                self = .${caseName}(try ${msg.swiftName}(from: &container))`);
+        }
+        lines.push('            default:');
+        lines.push('                self = .unknown(type)');
+        lines.push('            }');
+        lines.push('        } catch {');
+        lines.push('            // Plain string messages (no array structure)');
+        lines.push('            let container = try decoder.singleValueContainer()');
+        lines.push('            let value = try container.decode(String.self)');
         lines.push('            switch value {');
         for (const msg of plainReceive) {
           const caseName = toSwiftEnumCase(msg.messageName);
@@ -114,26 +131,25 @@ function MessageEnums({ asyncapi, params }) {
         lines.push('            default:');
         lines.push('                self = .unknown(value)');
         lines.push('            }');
-        lines.push('            return');
         lines.push('        }');
+        lines.push('    }');
+      } else {
+        lines.push('        // Array-format discriminated decoding (msgpack)');
+        lines.push('        var container = try decoder.unkeyedContainer()');
+        lines.push('        let type = try container.decode(String.self)');
         lines.push('');
+        lines.push('        switch type {');
+        for (const msg of objectReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`        case "${constVal}":`);
+          lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: &container))`);
+        }
+        lines.push('        default:');
+        lines.push('            self = .unknown(type)');
+        lines.push('        }');
+        lines.push('    }');
       }
-
-      lines.push('        // Array-format discriminated decoding (msgpack)');
-      lines.push('        var container = try decoder.unkeyedContainer()');
-      lines.push('        let type = try container.decode(String.self)');
-      lines.push('');
-      lines.push('        switch type {');
-      for (const msg of objectReceive) {
-        const caseName = toSwiftEnumCase(msg.messageName);
-        const constVal = msg.constTypeValue || msg.messageName;
-        lines.push(`        case "${constVal}":`);
-        lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: &container))`);
-      }
-      lines.push('        default:');
-      lines.push('            self = .unknown(type)');
-      lines.push('        }');
-      lines.push('    }');
     } else {
       // ── Standard keyed-container decoding (JSON / maps) ──
 
@@ -150,10 +166,25 @@ function MessageEnums({ asyncapi, params }) {
       lines.push('    public init(from decoder: Decoder) throws {');
 
       if (plainReceive.length > 0 && objectReceive.length > 0) {
-        // Try single-value decoding first for plain string messages
-        lines.push('        // Try plain string messages first');
-        lines.push('        if let container = try? decoder.singleValueContainer(),');
-        lines.push('           let value = try? container.decode(String.self) {');
+        // Try keyed container first (common case); plain string messages fall through to catch.
+        lines.push('        do {');
+        lines.push('            let container = try decoder.container(keyedBy: TypeKey.self)');
+        lines.push(`            let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
+        lines.push('');
+        lines.push('            switch type {');
+        for (const msg of objectReceive) {
+          const caseName = toSwiftEnumCase(msg.messageName);
+          const constVal = msg.constTypeValue || msg.messageName;
+          lines.push(`            case "${constVal}":`);
+          lines.push(`                self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
+        }
+        lines.push('            default:');
+        lines.push('                self = .unknown(type)');
+        lines.push('            }');
+        lines.push('        } catch {');
+        lines.push('            // Plain string messages (no keyed structure)');
+        lines.push('            let container = try decoder.singleValueContainer()');
+        lines.push('            let value = try container.decode(String.self)');
         lines.push('            switch value {');
         for (const msg of plainReceive) {
           const caseName = toSwiftEnumCase(msg.messageName);
@@ -164,22 +195,6 @@ function MessageEnums({ asyncapi, params }) {
         lines.push('            default:');
         lines.push('                self = .unknown(value)');
         lines.push('            }');
-        lines.push('            return');
-        lines.push('        }');
-        lines.push('');
-        lines.push('        // Discriminated object messages');
-        lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');
-        lines.push(`        let type = try container.decode(String.self, forKey: .${swiftKeyName})`);
-        lines.push('');
-        lines.push('        switch type {');
-        for (const msg of objectReceive) {
-          const caseName = toSwiftEnumCase(msg.messageName);
-          const constVal = msg.constTypeValue || msg.messageName;
-          lines.push(`        case "${constVal}":`);
-          lines.push(`            self = .${caseName}(try ${msg.swiftName}(from: decoder))`);
-        }
-        lines.push('        default:');
-        lines.push('            self = .unknown(type)');
         lines.push('        }');
       } else if (objectReceive.length > 0) {
         lines.push('        let container = try decoder.container(keyedBy: TypeKey.self)');

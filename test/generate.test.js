@@ -862,13 +862,28 @@ describe('mixed-payloads spec (integer enums + plain string messages)', () => {
       assert.ok(msgEnums.includes('case unknown(String)'));
     });
 
-    it('IncomingMessage decoder tries single-value string first for plain messages', () => {
-      assert.ok(msgEnums.includes('singleValueContainer'));
+    it('IncomingMessage decoder tries keyed container first then falls back to singleValueContainer', () => {
+      // Keyed container must come first to avoid "Found existing top-level decoding container" crash.
+      // singleValueContainer() never throws, so if tried first it registers itself and blocks
+      // subsequent container(keyedBy:) calls.
+      // Scope to IncomingMessage Decodable extension to avoid matching the encoder's singleValueContainer
+      const decodableStart = msgEnums.indexOf('extension IncomingMessage: Decodable');
+      const decodableSection = msgEnums.slice(decodableStart);
+      const keyedIdx = decodableSection.indexOf('container(keyedBy: TypeKey.self)');
+      const singleIdx = decodableSection.indexOf('singleValueContainer');
+      assert.ok(keyedIdx !== -1, 'should use keyed container');
+      assert.ok(singleIdx !== -1, 'should use singleValueContainer for plain strings');
+      assert.ok(keyedIdx < singleIdx, 'keyed container must come before singleValueContainer');
     });
 
-    it('IncomingMessage decoder falls back to keyed type discriminator for objects', () => {
-      assert.ok(msgEnums.includes('TypeKey'));
-      assert.ok(msgEnums.includes('forKey: .type'));
+    it('IncomingMessage decoder uses do/catch for container fallback', () => {
+      assert.ok(msgEnums.includes('do {'));
+      assert.ok(msgEnums.includes('} catch {'));
+    });
+
+    it('IncomingMessage decoder does not use try? singleValueContainer pattern', () => {
+      assert.ok(!msgEnums.includes('try? decoder.singleValueContainer()'),
+        'should not use try? on singleValueContainer — it never throws and registers the container');
     });
 
     it('OutgoingMessage encodes plain string messages via singleValueContainer', () => {
@@ -1010,6 +1025,20 @@ describe('custom-discriminator spec (event_type key, pathname, plain string cons
       assert.ok(!msgEnums.includes('case "PriceUpdate":'));
       assert.ok(!msgEnums.includes('case "TradeExecuted":'));
       assert.ok(!msgEnums.includes('case "Pong":'));
+    });
+
+    it('decoder tries keyed container before singleValueContainer', () => {
+      const decodableStart = msgEnums.indexOf('Decodable');
+      const decodableSection = msgEnums.slice(decodableStart);
+      const keyedIdx = decodableSection.indexOf('container(keyedBy: TypeKey.self)');
+      const singleIdx = decodableSection.indexOf('singleValueContainer');
+      assert.ok(keyedIdx < singleIdx, 'keyed container must come before singleValueContainer');
+    });
+
+    it('decoder uses do/catch not try? for container fallback', () => {
+      assert.ok(!msgEnums.includes('try? decoder.singleValueContainer()'));
+      assert.ok(msgEnums.includes('do {'));
+      assert.ok(msgEnums.includes('} catch {'));
     });
   });
 
