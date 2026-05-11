@@ -1,7 +1,7 @@
 // helpers/schema.js — Extract messages, schemas, and enums from parsed AsyncAPI v3 document
 // Parser v3 API: collections have .all() returning arrays, schemas have method-based accessors
 
-const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection } = require('./swift');
+const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection, swiftStringEscape } = require('./swift');
 
 /**
  * Apply the current type prefix to a base name.
@@ -399,7 +399,11 @@ function buildServerURL(asyncapi, serverName) {
       const host = server.host();
       const pathname = typeof server.pathname === 'function' ? server.pathname() : '';
       const path = pathname && pathname !== '/' ? pathname : '';
-      return { protocol, host, pathname: path, url: `${protocol}://${host}${path}` };
+      const url = `${protocol}://${host}${path}`;
+      if (!/^wss?:\/\/[A-Za-z0-9.\-:/_?=&%#+@!$'()*,;~\[\]]+$/.test(url)) {
+        throw new Error(`Unsafe server URL rejected during generation: ${url}`);
+      }
+      return { protocol, host, pathname: path, url };
     }
   }
   return null;

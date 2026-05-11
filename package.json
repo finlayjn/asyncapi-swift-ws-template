@@ -4,8 +4,8 @@
   "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
   "main": "template/index.js",
   "scripts": {
-    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/compile.test.js test/swift-runtime.test.js",
-    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js",
+    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/url-injection.test.js test/compile.test.js test/swift-runtime.test.js",
+    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/url-injection.test.js",
     "test:compile": "node --test test/compile.test.js",
     "test:swift": "node --test test/swift-runtime.test.js",
     "test:quick": "node --test test/generate.test.js test/generate-new-features.test.js"

@@ -1,0 +1,36 @@
+asyncapi: 3.0.0
+info:
+  title: Malicious URL Backslash
+  version: 1.0.0
+  description: Spec with backslashes in the server host to test injection prevention.
+
+servers:
+  evil:
+    host: 'localhost\\")+evil()+URL(string:\\"x'
+    protocol: ws
+
+channels:
+  main:
+    address: /
+    messages:
+      ping:
+        $ref: "#/components/messages/Ping"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/ping"
+
+components:
+  messages:
+    Ping:
+      name: ping
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: ping

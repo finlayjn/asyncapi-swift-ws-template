@@ -347,6 +347,19 @@ function prefixedName(name) {
   return _typePrefix ? _typePrefix + name : name;
 }
 
+/**
+ * Escape a string for safe interpolation inside a Swift string literal.
+ * Handles backslashes, quotes, carriage returns, newlines, and null bytes.
+ */
+function swiftStringEscape(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u0000/g, '');
+}
+
 module.exports = {
   toSwiftTypeName,
   toSwiftBaseTypeName,
@@ -369,5 +382,6 @@ module.exports = {
   setPerspective,
   getPerspective,
   clientDirection,
+  swiftStringEscape,
   SWIFT_KEYWORDS,
 };

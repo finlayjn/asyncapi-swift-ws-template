@@ -1,7 +1,7 @@
 // template/WebSocketClient.js — Generates the actor-based WebSocket client
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { derivePackageName, prefixedName, setTypePrefix } = require('../helpers/swift');
+const { derivePackageName, prefixedName, setTypePrefix, swiftStringEscape } = require('../helpers/swift');
 const { buildServerURL } = require('../helpers/schema');
 
 function WebSocketClient({ asyncapi, params }) {
@@ -52,7 +52,7 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('    public let pingInterval: TimeInterval?');
   lines.push('');
   lines.push('    public init(');
-  lines.push(`        url: URL${serverInfo ? ` = URL(string: "${serverInfo.url}")!` : ''},`);
+  lines.push(`        url: URL${serverInfo ? ` = URL(string: "${swiftStringEscape(serverInfo.url)}")!` : ''},`);
   lines.push('        headers: [String: String] = [:],');
   lines.push(`        serializer: ${serializerProto} = ${defaultSerializer},`);
   if (reconnect) {
