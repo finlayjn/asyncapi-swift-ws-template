@@ -11,10 +11,10 @@
     "test:quick": "node --test test/generate.test.js test/generate-new-features.test.js"
   },
   "dependencies": {
-    "@asyncapi/generator-react-sdk": "^1.1.2"
+    "@asyncapi/generator-react-sdk": "^1.1.3"
   },
   "devDependencies": {
-    "@asyncapi/generator": "^2.5.0"
+    "@asyncapi/generator": "^3.2.1"
   },
   "generator": {
     "apiVersion": "v3",
