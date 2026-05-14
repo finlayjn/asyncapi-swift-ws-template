@@ -39,27 +39,27 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 # Install the AsyncAPI CLI
 npm install -g @asyncapi/cli
 
-# Generate from a local template checkout
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient -p server=dev
+# Generate using the published template
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient -p server=dev
 
 # With a client-perspective spec (non-standard AsyncAPI v3)
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient \
   -p server=dev -p perspective=client
 
 # With MessagePack serialization (keyed map decoding, the default)
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient \
   -p server=dev -p serialization=msgpack
 
 # With MessagePack positional array decoding
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient \
   -p server=dev -p serialization=msgpack -p msgpackFormat=array
 
 # With a type prefix
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient \
   -p server=dev -p typePrefix=OMN
 
 # Allow name collisions (when multiple messages share the same name field)
-asyncapi generate fromTemplate ./my-api.asyncapi.yaml ./ -o ./MyClient \
+asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-ws-template -o ./MyClient \
   -p server=dev -p allowNameCollisions=true
 
 # Compile the generated package
@@ -279,9 +279,9 @@ cd output/basic && swift build
 - [ ] **Retry / queue for outgoing messages** — buffer sends when disconnected and flush on reconnect
 - [ ] **Connection health monitoring** — expose ping/pong latency and connection quality metrics
 - [ ] **Documentation comments** — generate `///` doc comments from AsyncAPI descriptions on all types and properties
-- [ ] **Publish to npm** — publish as a proper AsyncAPI generator template installable via npm
+- [x] **Publish to npm** — published as `@finlayjn/asyncapi-swift-ws-template`
 - [ ] **Sample data** - generate `.sample` extensions based on `example` values in the AsyncAPI spec for easier testing and debugging
 
 ## License
 
-MIT
+Apache-2.0

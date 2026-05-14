@@ -1,8 +1,30 @@
 {
   "name": "@finlayjn/asyncapi-swift-ws-template",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
   "main": "template/index.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/finlayjn/asyncapi-swift-ws-template.git"
+  },
+  "keywords": [
+    "asyncapi",
+    "generator",
+    "template",
+    "swift",
+    "websocket",
+    "codegen"
+  ],
+  "files": [
+    "template/",
+    "helpers/",
+    "hooks/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "node --test test/generate.test.js test/generate-new-features.test.js test/url-injection.test.js test/compile.test.js test/swift-runtime.test.js",
     "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/url-injection.test.js",
