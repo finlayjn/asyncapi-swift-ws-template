@@ -38,6 +38,17 @@ describe('basic spec (JSON, reconnect, no prefix)', () => {
     assert.ok(!generatedFileExists(out, 'Sources/Enums.swift'));
   });
 
+  // ── .gitignore ──
+
+  it('generates .gitignore', () => {
+    assert.ok(generatedFileExists(out, '.gitignore'));
+  });
+
+  it('.gitignore contains .DS_Store', () => {
+    const gitignore = readGenerated(out, '.gitignore');
+    assert.ok(gitignore.includes('.DS_Store'));
+  });
+
   // ── Package.swift ──
 
   describe('Package.swift', () => {

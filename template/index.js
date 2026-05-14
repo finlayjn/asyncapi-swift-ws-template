@@ -3,6 +3,7 @@
 
 const { setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
 const PackageSwift = require('./PackageSwift');
+const Gitignore = require('./Gitignore');
 const Models = require('./Models');
 const Enums = require('./Enums');
 const MessageEnums = require('./MessageEnums');
@@ -17,6 +18,7 @@ function Index({ asyncapi, params, originalAsyncAPI }) {
 
   return [
     <PackageSwift key="package" asyncapi={asyncapi} params={params} />,
+    <Gitignore key="gitignore" />,
     <Models key="models" asyncapi={asyncapi} params={params} />,
     <Enums key="enums" asyncapi={asyncapi} params={params} />,
     <MessageEnums key="messageEnums" asyncapi={asyncapi} params={params} />,

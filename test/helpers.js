@@ -10,7 +10,11 @@ const OUTPUT_BASE = path.join(__dirname, '..', '.test-output');
 /**
  * Generate Swift code from a fixture spec with given params.
  * Returns the output directory path.
+ * Results are cached by fixture+params — repeated calls with the same
+ * combination skip the CLI invocation and return the existing output dir.
  */
+const _generateCache = new Map();
+
 function generate(fixtureName, params = {}) {
   const specPath = path.join(FIXTURES_DIR, fixtureName);
   if (!fs.existsSync(specPath)) {
@@ -24,6 +28,12 @@ function generate(fixtureName, params = {}) {
     .join('_');
   const dirName = fixtureName.replace(/\.(asyncapi\.)?ya?ml$/, '') + (paramStr ? `_${paramStr}` : '');
   const outputDir = path.join(OUTPUT_BASE, dirName);
+
+  // Return cached result if already generated this run
+  const cacheKey = dirName;
+  if (_generateCache.has(cacheKey)) {
+    return _generateCache.get(cacheKey);
+  }
 
   // Build CLI args
   const paramArgs = Object.entries(params)
@@ -40,6 +50,7 @@ function generate(fixtureName, params = {}) {
     throw new Error(`Generation failed for ${fixtureName}:\n${stderr}\n${stdout}`);
   }
 
+  _generateCache.set(cacheKey, outputDir);
   return outputDir;
 }
 
