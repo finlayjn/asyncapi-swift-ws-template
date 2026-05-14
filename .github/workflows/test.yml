@@ -13,5 +13,6 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - run: npm install -g @asyncapi/cli
+      - run: npm install -g @asyncapi/cli --force
+      - run: mkdir -p $(npm root -g)/@asyncapi/cli/lib/utils/logs
       - run: npm test
