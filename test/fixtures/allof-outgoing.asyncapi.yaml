@@ -1,0 +1,179 @@
+asyncapi: 3.0.0
+info:
+  title: Test AllOf Outgoing
+  version: 1.0.0
+  description: |
+    Spec that exercises allOf composition for outgoing messages.
+    Messages using allOf should generate typed structs, not raw String cases.
+
+servers:
+  local:
+    host: localhost:9010
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      orderPreviewSubscribe:
+        $ref: "#/components/messages/OrderPreviewSubscribe"
+      placeOrder:
+        $ref: "#/components/messages/PlaceOrder"
+      cancelOrder:
+        $ref: "#/components/messages/CancelOrder"
+      orderStatus:
+        $ref: "#/components/messages/OrderStatus"
+      orderFill:
+        $ref: "#/components/messages/OrderFill"
+
+operations:
+  sendToServer:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/orderPreviewSubscribe"
+      - $ref: "#/channels/main/messages/placeOrder"
+      - $ref: "#/channels/main/messages/cancelOrder"
+
+  receiveFromServer:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/orderStatus"
+      - $ref: "#/channels/main/messages/orderFill"
+
+components:
+  schemas:
+    OrderAmount:
+      type: object
+      properties:
+        value:
+          type: string
+        currency:
+          type: string
+      required:
+        - value
+        - currency
+
+    OrderInput:
+      type: object
+      required:
+        - venue
+        - asset_id
+        - side
+        - order_type
+        - amount
+      properties:
+        venue:
+          type: string
+          enum: [polymarket]
+        asset_id:
+          type: string
+        side:
+          type: string
+          enum: [buy, sell]
+        order_type:
+          type: string
+          enum: [GTC, FOK, GTD, FAK]
+        amount:
+          $ref: "#/components/schemas/OrderAmount"
+        limit_price:
+          type: string
+        worst_price:
+          type: string
+        post_only:
+          type: boolean
+        expires_at_ms:
+          type: integer
+
+  messages:
+    OrderPreviewSubscribe:
+      name: order_preview_subscribe
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/OrderInput"
+          - type: object
+            additionalProperties: false
+            required:
+              - type
+              - preview_id
+              - venue
+            properties:
+              type:
+                type: string
+                const: order_preview_subscribe
+              preview_id:
+                type: string
+
+    PlaceOrder:
+      name: place_order
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/OrderInput"
+          - type: object
+            additionalProperties: false
+            required:
+              - type
+              - order_id
+              - venue
+            properties:
+              type:
+                type: string
+                const: place_order
+              order_id:
+                type: string
+
+    CancelOrder:
+      name: cancel_order
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: cancel_order
+          order_id:
+            type: string
+        required:
+          - type
+          - order_id
+
+    OrderStatus:
+      name: order_status
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: order_status
+          order_id:
+            type: string
+          status:
+            type: string
+            enum: [pending, filled, cancelled]
+        required:
+          - type
+          - order_id
+          - status
+
+    OrderFill:
+      name: order_fill
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: order_fill
+          order_id:
+            type: string
+          price:
+            type: string
+          size:
+            type: string
+        required:
+          - type
+          - order_id
+          - price
+          - size

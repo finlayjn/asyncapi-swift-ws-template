@@ -89,6 +89,22 @@ function extractMessages(asyncapi) {
           }
         }
 
+        // Check for allOf composition — flatten and treat as object payload
+        if (!hasObjectPayload && payload) {
+          const flattened = flattenAllOf(payload);
+          if (flattened && Object.keys(flattened.properties).length > 0) {
+            hasObjectPayload = true;
+            for (const [key, propSchema] of Object.entries(flattened.properties)) {
+              const c = call(propSchema, 'const');
+              if (c !== undefined && c !== null) {
+                discriminatorKey = key;
+                constTypeValue = String(c);
+                break;
+              }
+            }
+          }
+        }
+
         if (!hasObjectPayload && payload) {
           const c = call(payload, 'const');
           if (c !== undefined && c !== null) {
@@ -122,6 +138,23 @@ function extractMessages(asyncapi) {
           hasObjectPayload = true;
           // Find the discriminator: first property with a const value
           for (const [key, propSchema] of Object.entries(props)) {
+            const c = call(propSchema, 'const');
+            if (c !== undefined && c !== null) {
+              discriminatorKey = key;
+              constTypeValue = String(c);
+              break;
+            }
+          }
+        }
+      }
+
+      // Check for allOf composition — flatten and treat as object payload
+      if (!hasObjectPayload && payload) {
+        const flattened = flattenAllOf(payload);
+        if (flattened && Object.keys(flattened.properties).length > 0) {
+          hasObjectPayload = true;
+          // Find the discriminator in the flattened properties
+          for (const [key, propSchema] of Object.entries(flattened.properties)) {
             const c = call(propSchema, 'const');
             if (c !== undefined && c !== null) {
               discriminatorKey = key;
@@ -287,9 +320,22 @@ function extractEnums(asyncapi) {
  * Recursively scan a schema for enum properties.
  */
 function scanForEnums(schema, contextName, enumMap, nameCount) {
-  if (!schema || typeof schema.properties !== 'function') return;
+  if (!schema) return;
 
-  const props = schema.properties();
+  // Try direct properties
+  let props = null;
+  if (typeof schema.properties === 'function') {
+    props = schema.properties();
+  }
+
+  // If no direct properties, try flattening allOf
+  if ((!props || Object.keys(props).length === 0)) {
+    const flattened = flattenAllOf(schema);
+    if (flattened) {
+      props = flattened.properties;
+    }
+  }
+
   if (!props) return;
 
   for (const [propName, propSchema] of Object.entries(props)) {
@@ -336,6 +382,56 @@ function scanForEnums(schema, contextName, enumMap, nameCount) {
 }
 
 /**
+ * Flatten an allOf-composed schema into merged properties and required fields.
+ * Returns { properties: { ... }, requiredFields: [...] } or null if not allOf.
+ */
+function flattenAllOf(schema) {
+  if (!schema) return null;
+
+  // Check for allOf on the schema model
+  let allOfVariants = null;
+  if (typeof schema.allOf === 'function') {
+    const variants = schema.allOf();
+    if (Array.isArray(variants) && variants.length > 0) {
+      allOfVariants = variants;
+    }
+  }
+
+  if (!allOfVariants) return null;
+
+  const mergedProps = {};
+  const mergedRequired = [];
+
+  for (const variant of allOfVariants) {
+    // Collect properties
+    if (typeof variant.properties === 'function') {
+      const props = variant.properties();
+      if (props && typeof props === 'object') {
+        for (const [key, value] of Object.entries(props)) {
+          if (!mergedProps[key]) {
+            mergedProps[key] = value;
+          }
+        }
+      }
+    }
+
+    // Collect required fields
+    const req = typeof variant.required === 'function' ? variant.required() : null;
+    if (Array.isArray(req)) {
+      for (const r of req) {
+        if (!mergedRequired.includes(r)) {
+          mergedRequired.push(r);
+        }
+      }
+    }
+  }
+
+  if (Object.keys(mergedProps).length === 0) return null;
+
+  return { properties: mergedProps, requiredFields: mergedRequired };
+}
+
+/**
  * Build a flat property list from a payload schema.
  * @param {object} schema - Parsed schema model
  * @param {string} parentSwiftName - Parent type name for context
@@ -344,12 +440,26 @@ function scanForEnums(schema, contextName, enumMap, nameCount) {
  * Returns array of { name, swiftName, swiftType, isRequired, isConst, constVal, description, wireFormat }
  */
 function buildPropertyList(schema, parentSwiftName, enumDefs, inlineStructMap) {
-  if (!schema || typeof schema.properties !== 'function') return [];
+  // Try direct properties first
+  let props = null;
+  let requiredFields = [];
 
-  const props = schema.properties();
-  if (!props) return [];
+  if (schema && typeof schema.properties === 'function') {
+    props = schema.properties();
+    requiredFields = (typeof schema.required === 'function' ? schema.required() : null) || [];
+  }
 
-  const requiredFields = (typeof schema.required === 'function' ? schema.required() : null) || [];
+  // If no direct properties, try flattening allOf
+  if ((!props || Object.keys(props).length === 0) && schema) {
+    const flattened = flattenAllOf(schema);
+    if (flattened) {
+      props = flattened.properties;
+      requiredFields = flattened.requiredFields;
+    }
+  }
+
+  if (!props || Object.keys(props).length === 0) return [];
+
   const result = [];
 
   for (const [propName, propSchema] of Object.entries(props)) {
@@ -429,9 +539,19 @@ function collectReceiveSchemaNames(asyncapi) {
 }
 
 function _collectNestedSchemaNames(schema, names) {
-  if (!schema || typeof schema.properties !== 'function') return;
+  let props = null;
+  if (schema && typeof schema.properties === 'function') {
+    props = schema.properties();
+  }
 
-  const props = schema.properties();
+  // If no direct properties, try flattening allOf
+  if ((!props || Object.keys(props).length === 0) && schema) {
+    const flattened = flattenAllOf(schema);
+    if (flattened) {
+      props = flattened.properties;
+    }
+  }
+
   if (!props) return;
 
   for (const [, propSchema] of Object.entries(props)) {
@@ -494,8 +614,19 @@ function extractInlineStructs(asyncapi) {
   const schemas = extractSchemas(asyncapi);
 
   function scanSchema(schema, parentBaseName) {
-    if (!schema || typeof schema.properties !== 'function') return;
-    const props = schema.properties();
+    let props = null;
+    if (schema && typeof schema.properties === 'function') {
+      props = schema.properties();
+    }
+
+    // If no direct properties, try flattening allOf
+    if ((!props || Object.keys(props).length === 0) && schema) {
+      const flattened = flattenAllOf(schema);
+      if (flattened) {
+        props = flattened.properties;
+      }
+    }
+
     if (!props) return;
 
     for (const [propName, propSchema] of Object.entries(props)) {

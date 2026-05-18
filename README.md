@@ -12,6 +12,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (enabled by default)
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching. When both object and plain-string messages exist, the decoder tries the keyed container first and falls back to `singleValueContainer` in a `catch` block — this avoids a Swift `Decoder` crash where `singleValueContainer()` (which never throws) would register the top-level container and block subsequent `container(keyedBy:)` calls
+- **`allOf` composition** — messages using `allOf` (e.g. combining a base schema via `$ref` with additional properties) are flattened into a single struct with all properties merged. Enum extraction and inline struct scanning also traverse `allOf` sub-schemas
 - **`anyOf` / `oneOf` support** — `anyOf [Type, null]` maps to `Type?` (optional); multi-type `anyOf` maps to a generated `JSONValue` enum with a warning
 - **Inline struct generation** — anonymous inline objects (in properties, array items, or `anyOf` variants) are extracted into dedicated structs, deduplicated by shape (matching property names, types, and nullability)
 - **`JSONValue` fallback type** — a `Codable & Sendable & Hashable` enum handling arbitrary JSON values (string, int, double, bool, object, array, null), generated only when needed
@@ -229,6 +230,7 @@ Test fixtures live in `test/fixtures/` and cover:
 | `custom-discriminator.asyncapi.yaml` | Non-standard discriminator key (`event_type`), server `pathname`, plain string const payloads (`PING`/`PONG`), public init with const auto-assignment |
 | `anyof-inline.asyncapi.yaml` | `anyOf` nullable patterns (`[type, null]` → optional), multi-type `anyOf` → `JSONValue` fallback, inline anonymous objects in properties and array items, untyped object → `[String: JSONValue]`, conditional `JSONValue` generation |
 | `name-collision.asyncapi.yaml` | Name collision detection (two messages with same `name`, different payloads), hard error by default, `allowNameCollisions=true` bypass with component-key disambiguation |
+| `allof-outgoing.asyncapi.yaml` | `allOf` composition for outgoing messages — flattens `$ref` + inline properties into typed structs, enum extraction from composed schemas, const auto-assignment, `typePrefix` support |
 | `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
 
 Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), and all combinations thereof.
@@ -249,7 +251,7 @@ cd output/basic && swift build
 - **Deep nesting** — inline struct extraction handles one level of anonymous objects (direct properties, array items, `anyOf` variants). Deeply nested anonymous objects beyond the first level may still fall back to `JSONValue`. (Note: `prefixItems` tuple arrays where all elements share the same type are correctly mapped to their common Swift type, e.g. `[String]`.)
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
 - **Apple platforms only** — generated code uses `URLSessionWebSocketTask` and Foundation, limiting it to Apple platforms. Linux/Windows support would require a different WebSocket library.
-- **Limited `allOf` composition** — `anyOf` and `oneOf` are handled (nullable pattern → optional, multi-type → `JSONValue`), but `allOf` merging of multiple schemas into a single struct is not yet supported.
+- **Shallow `allOf` flattening** — `allOf` composition merges properties from all sub-schemas into a single struct, but deeply nested `allOf` (e.g. `allOf` inside an `allOf` variant) is not recursively resolved.
 - **No query parameters or WebSocket binding support** — AsyncAPI WebSocket channel bindings (query params, headers at the channel level) are not read.
 - **No authentication generation** — while auth headers can be passed via `ClientConfiguration.headers`, no auth-specific code is generated from security schemes.
 - **MessagePack only via msgpack-swift** — the `DMMessagePack` product from [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift) is the only supported MessagePack library.
@@ -261,7 +263,7 @@ cd output/basic && swift build
 - [x] **Schema composition (`anyOf` / `oneOf`)** — nullable patterns map to optionals; multi-type unions map to `JSONValue`
 - [x] **Inline struct generation** — anonymous inline objects are extracted into dedicated structs, deduplicated by shape
 - [x] **Name collision detection** — hard error when different messages share the same name; `allowNameCollisions` bypass with disambiguation
-- [ ] **`allOf` schema merging** — merge multiple `allOf` schemas into a single struct
+- [x] **`allOf` schema merging** — `allOf` schemas are flattened into a single struct with merged properties and required fields
 - [x] **Integer enum raw types** — detect numeric enums and generate `Int`-backed Swift enums
 - [x] **Non-object message payloads** — plain string/const messages handled as `String` enum cases
 - [ ] **Other enum raw types** — detect `Double` or other numeric enums beyond `Int`
