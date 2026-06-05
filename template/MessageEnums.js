@@ -10,6 +10,7 @@ function MessageEnums({ asyncapi, params }) {
   setPerspective(params?.perspective);
   const useMsgpack = params?.serialization === 'msgpack';
   const msgpackArray = useMsgpack && params?.msgpackFormat === 'array';
+  const yieldUndecodable = params?.undecodableMessages !== 'drop';
   const allMessages = extractMessages(asyncapi);
 
   const sendMessages = allMessages.filter(m => clientDirection(m.direction) === 'outgoing');
@@ -76,6 +77,9 @@ function MessageEnums({ asyncapi, params }) {
       }
     }
     lines.push('    case unknown(String)');
+    if (yieldUndecodable) {
+      lines.push('    case undecodable(Data, any Error)');
+    }
     lines.push('}');
     lines.push('');
 

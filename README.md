@@ -17,7 +17,8 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Inline struct generation** — anonymous inline objects (in properties, array items, or `anyOf` variants) are extracted into dedicated structs, deduplicated by shape (matching property names, types, and nullability)
 - **`JSONValue` fallback type** — a `Codable & Sendable & Hashable` enum handling arbitrary JSON values (string, int, double, bool, object, array, null), generated only when needed
 - **Name collision detection** — if multiple messages share the same `name` field with different payloads, generation fails with a clear error. Pass `allowNameCollisions=true` to disambiguate using component keys instead
-- **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums
+- **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums. Enum values containing dots (e.g. `sensor.alarm.high_temperature`) are treated as word separators and converted to valid camelCase Swift identifiers with explicit raw value assignments
+- **Undecodable message handling** — messages that fail to decode are surfaced as `.undecodable(Data, any Error)` cases on `IncomingMessage` by default, giving consumers access to the raw data and error for logging or debugging. Pass `undecodableMessages=drop` to silently skip malformed messages instead
 - **Non-object message payloads** — plain string/const messages (e.g. `PING`/`PONG`) are handled as `String` cases without requiring a struct
 - **Public initializers** — all generated structs include explicit `public init(...)` methods; `const` fields are auto-assigned and excluded from parameters
 - **Server pathname support** — the generator appends the server's `pathname` to the `host` when building the default URL
@@ -79,6 +80,7 @@ cd ./MyClient && swift build
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
 | `allowNameCollisions` | no | `"false"` | When `"true"`, allow multiple messages to share the same `name` field. Colliding messages are disambiguated using their component key (e.g. `order_preview_response`). Default is `"false"`, which treats collisions as a generation error. |
 | `perspective` | no | `"server"` | Perspective from which the AsyncAPI spec is written: `server` (default, standard AsyncAPI v3 — `action: send` means server-to-client) or `client` (`action: send` means client-to-server). |
+| `undecodableMessages` | no | `"yield"` | How to handle messages that fail to decode: `yield` (default — adds `.undecodable(Data, any Error)` case to `IncomingMessage`) or `drop` (silently skip malformed messages). |
 | `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
 
 ## Quick start (generated client)
@@ -116,6 +118,8 @@ Task {
             print("Error: \(error.message)")
         case .unknown(let type):
             print("Unknown message type: \(type)")
+        case .undecodable(let data, let error):
+            print("Failed to decode \(data.count) bytes: \(error)")
         }
     }
 }
@@ -232,8 +236,9 @@ Test fixtures live in `test/fixtures/` and cover:
 | `name-collision.asyncapi.yaml` | Name collision detection (two messages with same `name`, different payloads), hard error by default, `allowNameCollisions=true` bypass with component-key disambiguation |
 | `allof-outgoing.asyncapi.yaml` | `allOf` composition for outgoing messages — flattens `$ref` + inline properties into typed structs, enum extraction from composed schemas, const auto-assignment, `typePrefix` support |
 | `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
+| `dotted-enums.asyncapi.yaml` | Enum values containing dots (namespaced codes like `sensor.alarm.high_temperature`), dot-to-camelCase conversion, explicit raw value assignments |
 
-Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), and all combinations thereof.
+Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), `undecodableMessages` (yield/drop), and all combinations thereof.
 
 ### Manual generation
 

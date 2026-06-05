@@ -9,6 +9,7 @@ function WebSocketClient({ asyncapi, params }) {
   const serverInfo = buildServerURL(asyncapi, params.server);
   const useMsgpack = params.serialization === 'msgpack';
   const reconnect = params.reconnect !== 'false';
+  const yieldUndecodable = params?.undecodableMessages !== 'drop';
 
   const connStateName = prefixedName('ConnectionState');
   const configName = prefixedName('ClientConfiguration');
@@ -208,7 +209,11 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push(`                    let incoming = try configuration.serializer.decode(${incomingName}.self, from: data)`);
   lines.push('                    messageContinuation?.yield(incoming)');
   lines.push('                } catch {');
-  lines.push('                    // Decoding error — skip malformed message');
+  if (yieldUndecodable) {
+    lines.push(`                    messageContinuation?.yield(.undecodable(data, error))`);
+  } else {
+    lines.push('                    // Decoding error — skip malformed message');
+  }
   lines.push('                }');
   lines.push('            } catch {');
   lines.push('                // Connection error');

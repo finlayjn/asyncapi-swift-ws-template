@@ -314,7 +314,7 @@ function toSwiftEnumCase(value) {
   value = String(value);
   const camel = value
     .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .split(/[_\s]+/)
+    .split(/[._\s]+/)
     .filter(Boolean)
     .map((word, i) => {
       if (i === 0) return word.toLowerCase();

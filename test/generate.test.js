@@ -223,6 +223,68 @@ describe('basic spec (JSON, reconnect, no prefix)', () => {
       assert.ok(client.includes('AsyncStream<ConnectionState>'));
     });
   });
+
+  // ── undecodableMessages defaults to yield ──
+
+  describe('IncomingMessage — undecodable case (default yield)', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('has undecodable case on IncomingMessage', () => {
+      assert.ok(msgEnums.includes('case undecodable(Data, any Error)'));
+    });
+  });
+
+  describe('WebSocketClient.swift — undecodable yield (default)', () => {
+    let client;
+    before(() => { client = readGenerated(out, 'Sources/WebSocketClient.swift'); });
+
+    it('yields .undecodable on decode failure', () => {
+      assert.ok(client.includes('.undecodable(data, error)'));
+    });
+
+    it('does not have skip comment', () => {
+      assert.ok(!client.includes('skip malformed message'));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// undecodableMessages=drop — opt out of undecodable case
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('undecodableMessages=drop', () => {
+  let out;
+
+  before(() => {
+    out = generate('basic.asyncapi.yaml', { server: 'local', undecodableMessages: 'drop' });
+  });
+
+  describe('IncomingMessage — no undecodable case', () => {
+    let msgEnums;
+    before(() => { msgEnums = readGenerated(out, 'Sources/MessageEnums.swift'); });
+
+    it('does not have undecodable case', () => {
+      assert.ok(!msgEnums.includes('case undecodable'));
+    });
+
+    it('still has unknown case', () => {
+      assert.ok(msgEnums.includes('case unknown(String)'));
+    });
+  });
+
+  describe('WebSocketClient.swift — silent drop', () => {
+    let client;
+    before(() => { client = readGenerated(out, 'Sources/WebSocketClient.swift'); });
+
+    it('has skip comment instead of yield', () => {
+      assert.ok(client.includes('skip malformed message'));
+    });
+
+    it('does not yield .undecodable', () => {
+      assert.ok(!client.includes('.undecodable'));
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1133,6 +1195,85 @@ describe('custom-discriminator with typePrefix=CD', () => {
 
     it('still generates public inits', () => {
       assert.ok(models.includes('public init('));
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// toSwiftEnumCase — unit tests for dot-separated enum values
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('toSwiftEnumCase with dots', () => {
+  const { toSwiftEnumCase } = require('../helpers/swift');
+
+  it('converts dotted+snake_case to camelCase', () => {
+    assert.equal(toSwiftEnumCase('sensor.alarm.high_temperature'), 'sensorAlarmHighTemperature');
+  });
+
+  it('converts dotted values to camelCase', () => {
+    assert.equal(toSwiftEnumCase('user.session.started'), 'userSessionStarted');
+    assert.equal(toSwiftEnumCase('user.session.expired'), 'userSessionExpired');
+  });
+
+  it('converts mixed dot and underscore separators', () => {
+    assert.equal(toSwiftEnumCase('device.status.battery_low'), 'deviceStatusBatteryLow');
+    assert.equal(toSwiftEnumCase('system.shutdown_requested'), 'systemShutdownRequested');
+  });
+
+  it('still handles plain snake_case', () => {
+    assert.equal(toSwiftEnumCase('post_only'), 'postOnly');
+  });
+
+  it('still handles simple values', () => {
+    assert.equal(toSwiftEnumCase('buy'), 'buy');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dotted enum values — dots in enum values must produce valid Swift case names
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('dotted enum values', () => {
+  let out;
+
+  before(() => {
+    out = generate('dotted-enums.asyncapi.yaml', { server: 'local' });
+  });
+
+  it('generates Enums.swift', () => {
+    assert.ok(generatedFileExists(out, 'Sources/Enums.swift'));
+  });
+
+  describe('Enums.swift', () => {
+    let enums;
+    before(() => { enums = readGenerated(out, 'Sources/Enums.swift'); });
+
+    it('generates Code enum (from alert.code property)', () => {
+      assert.ok(enums.includes('public enum Code: String, Codable, Sendable'));
+    });
+
+    it('generates NotificationCode enum (disambiguated from notification.code)', () => {
+      assert.ok(enums.includes('public enum NotificationCode: String, Codable, Sendable'));
+    });
+
+    it('converts dotted+snake_case values to camelCase case names', () => {
+      assert.ok(enums.includes('case sensorAlarmHighTemperature = "sensor.alarm.high_temperature"'));
+      assert.ok(enums.includes('case sensorAlarmLowPressure = "sensor.alarm.low_pressure"'));
+      assert.ok(enums.includes('case systemShutdownRequested = "system.shutdown_requested"'));
+    });
+
+    it('converts dotted values to camelCase case names', () => {
+      assert.ok(enums.includes('case userSessionStarted = "user.session.started"'));
+      assert.ok(enums.includes('case userSessionExpired = "user.session.expired"'));
+      assert.ok(enums.includes('case deviceStatusBatteryLow = "device.status.battery_low"'));
+    });
+
+    it('does not contain dots in any case name', () => {
+      const caseLines = enums.match(/^\s*case .+$/gm) || [];
+      for (const line of caseLines) {
+        const caseName = line.trim().replace(/^case\s+/, '').split(/[\s=]/)[0];
+        assert.ok(!caseName.includes('.'), `case name "${caseName}" contains a dot`);
+      }
     });
   });
 });

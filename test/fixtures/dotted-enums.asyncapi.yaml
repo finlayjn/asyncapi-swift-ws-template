@@ -1,0 +1,75 @@
+asyncapi: 3.0.0
+info:
+  title: Test Dotted Enums
+  version: 1.0.0
+  description: |
+    Spec exercising enum values that contain dots (namespaced codes).
+    Dots must be treated as word separators so generated Swift case names
+    are valid identifiers.
+
+servers:
+  local:
+    host: localhost:9001
+    protocol: ws
+    description: Local test server
+
+channels:
+  main:
+    address: /
+    messages:
+      alert:
+        $ref: "#/components/messages/Alert"
+      notification:
+        $ref: "#/components/messages/Notification"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/alert"
+      - $ref: "#/channels/main/messages/notification"
+
+components:
+  schemas:
+    AlertCode:
+      type: string
+      enum:
+        - sensor.alarm.high_temperature
+        - sensor.alarm.low_pressure
+        - system.shutdown_requested
+
+    NotifyCode:
+      type: string
+      enum:
+        - user.session.started
+        - user.session.expired
+        - device.status.battery_low
+
+  messages:
+    Alert:
+      name: alert
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: alert
+          code:
+            $ref: "#/components/schemas/AlertCode"
+          message:
+            type: string
+        required: [type, code]
+
+    Notification:
+      name: notification
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: notification
+          code:
+            $ref: "#/components/schemas/NotifyCode"
+        required: [type, code]

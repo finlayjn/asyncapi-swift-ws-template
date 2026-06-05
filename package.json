@@ -1,6 +1,6 @@
 {
   "name": "@finlayjn/asyncapi-swift-ws-template",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
   "main": "template/index.js",
   "license": "Apache-2.0",
@@ -78,6 +78,10 @@
       "perspective": {
         "description": "Perspective from which the AsyncAPI spec is written: 'server' (default, standard AsyncAPI v3 — send means server-to-client) or 'client' (send means client-to-server).",
         "default": "server"
+      },
+      "undecodableMessages": {
+        "description": "How to handle messages that fail to decode: 'yield' (default — adds an undecodable case to IncomingMessage so consumers can inspect the raw data and error) or 'drop' (silently skip malformed messages).",
+        "default": "yield"
       }
     }
   }
