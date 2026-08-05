@@ -15,6 +15,9 @@ function WebSocketClient({ asyncapi, params }) {
   const configName = prefixedName('ClientConfiguration');
   const clientName = prefixedName('WebSocketClient');
   const errorName = prefixedName('WebSocketClientError');
+  const policyProto = prefixedName('ReconnectionPolicy');
+  const backoffPolicy = prefixedName('ExponentialBackoffPolicy');
+  const noPolicy = prefixedName('NoReconnectionPolicy');
   const serializerProto = prefixedName('MessageSerializer');
   const jsonSerializer = prefixedName('JSONMessageSerializer');
   const msgpackSerializer = prefixedName('MessagePackSerializer');
@@ -39,6 +42,51 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('}');
   lines.push('');
 
+  // ── ReconnectionPolicy ──
+  if (reconnect) {
+    lines.push('/// Strategy controlling whether and when a lost connection is retried.');
+    lines.push('///');
+    lines.push('/// Inject a custom policy to override the default exponential backoff, or use');
+    lines.push(`/// \`${noPolicy}\` to disable automatic reconnection and drive it yourself.`);
+    lines.push(`public protocol ${policyProto}: Sendable {`);
+    lines.push('    /// Delay before the given 1-based reconnect attempt, or `nil` to stop retrying.');
+    lines.push('    func delay(forAttempt attempt: Int) -> TimeInterval?');
+    lines.push('}');
+    lines.push('');
+    lines.push('/// Exponential backoff with jitter (the default reconnection policy).');
+    lines.push(`public struct ${backoffPolicy}: ${policyProto} {`);
+    lines.push('    public let base: TimeInterval');
+    lines.push('    public let maxDelay: TimeInterval');
+    lines.push('    public let maxAttempts: Int');
+    lines.push('    public let jitter: ClosedRange<Double>');
+    lines.push('');
+    lines.push('    public init(');
+    lines.push('        base: TimeInterval = 1.0,');
+    lines.push('        maxDelay: TimeInterval = 60.0,');
+    lines.push('        maxAttempts: Int = 10,');
+    lines.push('        jitter: ClosedRange<Double> = 0.8...1.2');
+    lines.push('    ) {');
+    lines.push('        self.base = base');
+    lines.push('        self.maxDelay = maxDelay');
+    lines.push('        self.maxAttempts = maxAttempts');
+    lines.push('        self.jitter = jitter');
+    lines.push('    }');
+    lines.push('');
+    lines.push('    public func delay(forAttempt attempt: Int) -> TimeInterval? {');
+    lines.push('        guard attempt <= maxAttempts else { return nil }');
+    lines.push('        let raw = base * pow(2.0, Double(attempt - 1))');
+    lines.push('        return min(raw, maxDelay) * Double.random(in: jitter)');
+    lines.push('    }');
+    lines.push('}');
+    lines.push('');
+    lines.push('/// A policy that never reconnects. Use to fully own reconnection in the caller.');
+    lines.push(`public struct ${noPolicy}: ${policyProto} {`);
+    lines.push('    public init() {}');
+    lines.push('    public func delay(forAttempt attempt: Int) -> TimeInterval? { nil }');
+    lines.push('}');
+    lines.push('');
+  }
+
   // ── Configuration ──
   lines.push('/// Configuration for the WebSocket client.');
   lines.push(`public struct ${configName}: Sendable {`);
@@ -46,32 +94,32 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('    public let headers: [String: String]');
   lines.push(`    public let serializer: ${serializerProto}`);
   if (reconnect) {
-    lines.push('    public let autoReconnect: Bool');
-    lines.push('    public let maxReconnectAttempts: Int');
-    lines.push('    public let baseReconnectDelay: TimeInterval');
+    lines.push(`    public let reconnectionPolicy: ${policyProto}`);
   }
   lines.push('    public let pingInterval: TimeInterval?');
+  lines.push('    /// Invoked after every successful (re)connection, before incoming messages are');
+  lines.push('    /// delivered. Use it to (re-)authenticate and (re-)subscribe so the caller does not');
+  lines.push('    /// have to track connection state to restore subscriptions after a reconnect.');
+  lines.push('    public let onConnected: (@Sendable () async -> Void)?');
   lines.push('');
   lines.push('    public init(');
   lines.push(`        url: URL${serverInfo ? ` = URL(string: "${swiftStringEscape(serverInfo.url)}")!` : ''},`);
   lines.push('        headers: [String: String] = [:],');
   lines.push(`        serializer: ${serializerProto} = ${defaultSerializer},`);
   if (reconnect) {
-    lines.push('        autoReconnect: Bool = true,');
-    lines.push('        maxReconnectAttempts: Int = 10,');
-    lines.push('        baseReconnectDelay: TimeInterval = 1.0,');
+    lines.push(`        reconnectionPolicy: ${policyProto} = ${backoffPolicy}(),`);
   }
-  lines.push('        pingInterval: TimeInterval? = 30.0');
+  lines.push('        pingInterval: TimeInterval? = 30.0,');
+  lines.push('        onConnected: (@Sendable () async -> Void)? = nil');
   lines.push('    ) {');
   lines.push('        self.url = url');
   lines.push('        self.headers = headers');
   lines.push('        self.serializer = serializer');
   if (reconnect) {
-    lines.push('        self.autoReconnect = autoReconnect');
-    lines.push('        self.maxReconnectAttempts = maxReconnectAttempts');
-    lines.push('        self.baseReconnectDelay = baseReconnectDelay');
+    lines.push('        self.reconnectionPolicy = reconnectionPolicy');
   }
   lines.push('        self.pingInterval = pingInterval');
+  lines.push('        self.onConnected = onConnected');
   lines.push('    }');
   lines.push('}');
   lines.push('');
@@ -92,11 +140,15 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('');
   lines.push(`    private var messageContinuation: AsyncStream<${incomingName}>.Continuation?`);
   lines.push(`    private var stateContinuation: AsyncStream<${connStateName}>.Continuation?`);
+  lines.push('    private var errorContinuation: AsyncStream<any Error>.Continuation?');
   lines.push('');
   lines.push('    /// Stream of incoming messages from the server.');
   lines.push(`    public let messages: AsyncStream<${incomingName}>`);
   lines.push('    /// Stream of connection state changes.');
   lines.push(`    public let connectionState: AsyncStream<${connStateName}>`);
+  lines.push('    /// Stream of non-fatal errors: connection drops, ping failures, and — unless the');
+  lines.push('    /// undecodable message case is enabled — decode failures.');
+  lines.push('    public let errors: AsyncStream<any Error>');
   lines.push('');
   lines.push(`    private var _currentState: ${connStateName} = .disconnected {`);
   lines.push('        didSet { stateContinuation?.yield(_currentState) }');
@@ -115,6 +167,10 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push(`        var stateCont: AsyncStream<${connStateName}>.Continuation!`);
   lines.push('        self.connectionState = AsyncStream { stateCont = $0 }');
   lines.push('        self.stateContinuation = stateCont');
+  lines.push('');
+  lines.push('        var errCont: AsyncStream<any Error>.Continuation!');
+  lines.push('        self.errors = AsyncStream { errCont = $0 }');
+  lines.push('        self.errorContinuation = errCont');
   lines.push('    }');
   lines.push('');
 
@@ -136,6 +192,22 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('        task.resume()');
   lines.push('        startReceiving()');
   lines.push('        startPinging()');
+  lines.push('        markConnected()');
+  lines.push('    }');
+  lines.push('');
+  lines.push('    /// Transition to `.connected` and fire the onConnected hook. URLSession has no cheap');
+  lines.push('    /// socket-open callback, so resume() is treated as connected; a socket that fails to');
+  lines.push('    /// open surfaces immediately via the receive loop and triggers reconnection. Firing');
+  lines.push('    /// the hook here (not on first receive) lets callers re-subscribe on reconnect even');
+  lines.push('    /// when the server sends nothing until it receives a subscription.');
+  lines.push('    private func markConnected() {');
+  lines.push('        _currentState = .connected');
+  if (reconnect) {
+    lines.push('        reconnectAttempt = 0');
+  }
+  lines.push('        if let onConnected = configuration.onConnected {');
+  lines.push('            Task { await onConnected() }');
+  lines.push('        }');
   lines.push('    }');
   lines.push('');
 
@@ -188,14 +260,6 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('            guard let task = webSocketTask else { break }');
   lines.push('            do {');
   lines.push('                let message = try await task.receive()');
-  if (reconnect) {
-    lines.push('                if _currentState != .connected {');
-    lines.push('                    _currentState = .connected');
-    lines.push('                    reconnectAttempt = 0');
-    lines.push('                }');
-  } else {
-    lines.push('                if _currentState != .connected { _currentState = .connected }');
-  }
   lines.push('                let data: Data');
   lines.push('                switch message {');
   lines.push('                case .string(let text):');
@@ -212,11 +276,11 @@ function WebSocketClient({ asyncapi, params }) {
   if (yieldUndecodable) {
     lines.push(`                    messageContinuation?.yield(.undecodable(data, error))`);
   } else {
-    lines.push('                    // Decoding error — skip malformed message');
+    lines.push('                    errorContinuation?.yield(error)');
   }
   lines.push('                }');
   lines.push('            } catch {');
-  lines.push('                // Connection error');
+  lines.push('                errorContinuation?.yield(error)');
   lines.push('                break');
   lines.push('            }');
   lines.push('        }');
@@ -240,28 +304,36 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('            while !Task.isCancelled {');
   lines.push('                try? await Task.sleep(for: .seconds(interval))');
   lines.push('                guard let self, let task = await self.webSocketTask else { break }');
-  lines.push('                task.sendPing { _ in }');
+  lines.push('                task.sendPing { error in');
+  lines.push('                    if error != nil { Task { await self.handlePingFailure() } }');
+  lines.push('                }');
   lines.push('            }');
   lines.push('        }');
+  lines.push('    }');
+  lines.push('');
+  lines.push('    /// Surface a ping failure and, when reconnection is enabled, force the receive loop');
+  lines.push('    /// to observe the dead socket so it can reconnect.');
+  lines.push('    private func handlePingFailure() {');
+  lines.push(`        errorContinuation?.yield(${errorName}.pingFailed)`);
+  if (reconnect) {
+    lines.push('        guard !intentionalDisconnect else { return }');
+    lines.push('        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)');
+  }
   lines.push('    }');
 
   // reconnect logic
   if (reconnect) {
     lines.push('');
     lines.push('    private func handleDisconnect() async {');
-    lines.push('        guard configuration.autoReconnect,');
-    lines.push('              reconnectAttempt < configuration.maxReconnectAttempts else {');
+    lines.push('        let attempt = reconnectAttempt + 1');
+    lines.push('        guard let delay = configuration.reconnectionPolicy.delay(forAttempt: attempt) else {');
     lines.push('            _currentState = .disconnected');
     lines.push('            return');
     lines.push('        }');
+    lines.push('        reconnectAttempt = attempt');
+    lines.push('        _currentState = .reconnecting(attempt: attempt)');
     lines.push('');
-    lines.push('        reconnectAttempt += 1');
-    lines.push('        _currentState = .reconnecting(attempt: reconnectAttempt)');
-    lines.push('');
-    lines.push('        let delay = configuration.baseReconnectDelay * pow(2.0, Double(reconnectAttempt - 1))');
-    lines.push('        let jittered = min(delay, 60.0) * Double.random(in: 0.8...1.2)');
-    lines.push('');
-    lines.push('        try? await Task.sleep(for: .seconds(jittered))');
+    lines.push('        try? await Task.sleep(for: .seconds(delay))');
     lines.push('');
     lines.push('        guard !intentionalDisconnect, !Task.isCancelled else { return }');
     lines.push('        connect()');
@@ -281,9 +353,10 @@ function WebSocketClient({ asyncapi, params }) {
   lines.push('');
 
   // Error enum
-  lines.push(`/// Errors thrown by ${clientName}.`);
+  lines.push(`/// Errors surfaced by ${clientName}.`);
   lines.push(`public enum ${errorName}: Swift.Error, Sendable {`);
   lines.push('    case notConnected');
+  lines.push('    case pingFailed');
   lines.push('}');
 
   return (

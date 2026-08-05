@@ -133,27 +133,35 @@ await client.disconnect()
 
 ## Reconnection behavior
 
-When `reconnect` is `true` (the default generation parameter), the generated client includes auto-reconnect logic, **enabled by default at runtime**. You can configure or disable it via the configuration:
+When `reconnect` is `true` (the default generation parameter), the generated client includes auto-reconnect logic, **enabled by default at runtime**. Reconnection is driven by an injectable `ReconnectionPolicy`, and you can re-establish subscriptions on every (re)connect via the `onConnected` hook:
 
 ```swift
 let client = WebSocketClient(
     configuration: .init(
-        autoReconnect: true,          // default: true
-        maxReconnectAttempts: 10,     // default: 10
-        baseReconnectDelay: 1.0       // default: 1 second
+        // Default policy = ExponentialBackoffPolicy(base: 1.0, maxDelay: 60, maxAttempts: 10).
+        // Pass NoReconnectionPolicy() to fully own reconnection yourself.
+        reconnectionPolicy: ExponentialBackoffPolicy(),
+        // Runs after every successful (re)connection, before messages are delivered.
+        onConnected: {
+            try? await client.send(.auth(Auth(token: token)))
+            try? await client.send(.subscribe(Subscribe(channels: channels)))
+        }
     )
 )
 ```
 
 **How it works:**
 
-- The connection state transitions to `.connected` only after the first successful message is received from the server (not immediately on `task.resume()`), so consumers can trust the state.
-- On unexpected disconnection, the client enters `.reconnecting(attempt: N)` and waits using exponential backoff with jitter: `min(base * 2^(attempt-1), 60s) * random(0.8…1.2)`. Jitter prevents thundering-herd reconnections when many clients lose connectivity simultaneously.
-- The reconnect attempt counter resets to zero only after a successful reconnection (confirmed by receiving a message), so `maxReconnectAttempts` is strictly enforced even if the server is unreachable.
+- The connection state transitions to `.connected` optimistically on `task.resume()` (URLSession exposes no cheap socket-open callback). A socket that fails to open surfaces immediately via the receive loop and triggers reconnection.
+- The `onConnected` hook fires on **every** (re)connection, before incoming messages are delivered. Put authentication and subscription there so subscriptions are restored automatically after a reconnect without the caller tracking connection state.
+- On unexpected disconnection, the client asks its `ReconnectionPolicy` for the delay before the next 1-based attempt; returning `nil` stops retrying. The default `ExponentialBackoffPolicy` uses `min(base * 2^(attempt-1), maxDelay) * random(jitter)` — jitter prevents thundering-herd reconnections.
+- The attempt counter resets to zero on each successful (re)connection, so `maxAttempts` is strictly enforced while the server is unreachable.
 - Calling `disconnect()` sets an `intentionalDisconnect` flag that suppresses any in-flight or future reconnect attempts.
 - Connection state changes are observable via the `connectionState` AsyncStream: `.disconnected`, `.connecting`, `.connected`, `.reconnecting(attempt:)`.
+- Non-fatal errors — connection drops, ping failures (`WebSocketClientError.pingFailed`), and, when `undecodableMessages=drop`, decode failures — are surfaced on the `errors` AsyncStream rather than swallowed silently.
 
 To disable reconnection support entirely at generation time (removes the code from the output), pass `-p reconnect=false`.
+
 
 ## Architecture
 

@@ -209,10 +209,16 @@ describe('basic spec (JSON, reconnect, no prefix)', () => {
       assert.ok(client.includes('ws://localhost:9000'));
     });
 
-    it('has auto-reconnect config fields', () => {
-      assert.ok(client.includes('autoReconnect'));
-      assert.ok(client.includes('maxReconnectAttempts'));
-      assert.ok(client.includes('baseReconnectDelay'));
+    it('has an injectable reconnection policy', () => {
+      assert.ok(client.includes('public protocol ReconnectionPolicy: Sendable'));
+      assert.ok(client.includes('public struct ExponentialBackoffPolicy: ReconnectionPolicy'));
+      assert.ok(client.includes('public struct NoReconnectionPolicy: ReconnectionPolicy'));
+      assert.ok(client.includes('reconnectionPolicy: ReconnectionPolicy'));
+    });
+
+    it('exposes an onConnected hook and errors stream', () => {
+      assert.ok(client.includes('public let onConnected: (@Sendable () async -> Void)?'));
+      assert.ok(client.includes('public let errors: AsyncStream<any Error>'));
     });
 
     it('uses AsyncStream for messages', () => {
@@ -273,12 +279,13 @@ describe('undecodableMessages=drop', () => {
     });
   });
 
-  describe('WebSocketClient.swift — silent drop', () => {
+  describe('WebSocketClient.swift — drop surfaces to errors stream', () => {
     let client;
     before(() => { client = readGenerated(out, 'Sources/WebSocketClient.swift'); });
 
-    it('has skip comment instead of yield', () => {
-      assert.ok(client.includes('skip malformed message'));
+    it('surfaces decode errors to the errors stream instead of dropping silently', () => {
+      assert.ok(!client.includes('skip malformed message'));
+      assert.ok(client.includes('errorContinuation?.yield(error)'));
     });
 
     it('does not yield .undecodable', () => {
