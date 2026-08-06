@@ -30,6 +30,8 @@ function MessageEnums({ asyncapi, params }) {
     lines.push(`public enum ${outgoingName}: Sendable {`);
     for (const msg of sendMessages) {
       const caseName = toSwiftEnumCase(msg.messageName);
+      const doc = msg.summary || msg.title;
+      if (doc) lines.push(`    /// ${doc.split('\n')[0]}`);
       if (msg.hasObjectPayload) {
         lines.push(`    case ${caseName}(${msg.swiftName})`);
       } else {
@@ -70,14 +72,18 @@ function MessageEnums({ asyncapi, params }) {
     lines.push(`public enum ${incomingName}: Sendable {`);
     for (const msg of receiveMessages) {
       const caseName = toSwiftEnumCase(msg.messageName);
+      const doc = msg.summary || msg.title;
+      if (doc) lines.push(`    /// ${doc.split('\n')[0]}`);
       if (msg.hasObjectPayload) {
         lines.push(`    case ${caseName}(${msg.swiftName})`);
       } else {
         lines.push(`    case ${caseName}(String)`);
       }
     }
+    lines.push('    /// A message whose discriminator did not match any known type.');
     lines.push('    case unknown(String)');
     if (yieldUndecodable) {
+      lines.push('    /// A message whose payload failed to decode, with the raw bytes and the decode error.');
       lines.push('    case undecodable(Data, any Error)');
     }
     lines.push('}');

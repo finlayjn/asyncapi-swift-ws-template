@@ -36,6 +36,9 @@ function renderStruct(swiftName, properties, description, options = {}) {
 
   // Properties
   for (const prop of properties) {
+    if (prop.description) {
+      lines.push(`    /// ${prop.description.split('\n')[0]}`);
+    }
     if (prop.isConst) {
       // Const fields: still decode them but provide a default
       lines.push(`    public let ${prop.swiftName}: String`);
