@@ -7,9 +7,9 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 ## Features
 
 - **Swift 6 strict concurrency** — all generated types are `Sendable`; the client is an `actor`
-- **AsyncStream-based observation** — subscribe to incoming messages and connection state changes via `for await`
+- **AsyncStream-based observation** — subscribe to incoming messages, connection-state changes, and non-fatal errors via `for await`
 - **Configurable serialization** — JSON (default) or [MessagePack](https://github.com/fumoboy007/msgpack-swift) with a protocol-based abstraction. MessagePack mode supports both keyed map decoding (default) and positional array-format decoding via `UnkeyedDecodingContainer`, controlled by the `msgpackFormat` parameter
-- **Auto-reconnect** — optional exponential backoff with jitter, configurable max attempts and base delay (enabled by default)
+- **Auto-reconnect** — driven by an injectable `ReconnectionPolicy` (default: exponential backoff with jitter), with an `onConnected` hook that fires on every (re)connection so subscriptions can be restored automatically. Enabled by default; pass `NoReconnectionPolicy()` to own reconnection yourself
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching. When both object and plain-string messages exist, the decoder tries the keyed container first and falls back to `singleValueContainer` in a `catch` block — this avoids a Swift `Decoder` crash where `singleValueContainer()` (which never throws) would register the top-level container and block subsequent `container(keyedBy:)` calls
 - **`allOf` composition** — messages using `allOf` (e.g. combining a base schema via `$ref` with additional properties) are flattened into a single struct with all properties merged. Enum extraction and inline struct scanning also traverse `allOf` sub-schemas
@@ -33,7 +33,7 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 | `Sources/Enums.swift` | Shared enum types extracted from schemas — `String`-backed (e.g. `Side`) and `Int`-backed (e.g. `Level`) |
 | `Sources/MessageEnums.swift` | `IncomingMessage` / `OutgoingMessage` tagged enums with discriminated decoding |
 | `Sources/MessageSerializer.swift` | `MessageSerializer` protocol + JSON and (optionally) MessagePack implementations |
-| `Sources/WebSocketClient.swift` | Actor-based client using `URLSessionWebSocketTask`, `AsyncStream` observation, optional auto-reconnect with exponential backoff |
+| `Sources/WebSocketClient.swift` | Actor-based client using `URLSessionWebSocketTask`; `AsyncStream`s for `messages`, `connectionState`, and `errors`; optional auto-reconnect via an injectable `ReconnectionPolicy` with an `onConnected` hook |
 
 ## Usage
 
@@ -76,7 +76,7 @@ cd ./MyClient && swift build
 | `packageName` | no | Derived from spec title | Name for the generated Swift package |
 | `serialization` | no | `json` | Wire format: `json` or `msgpack` |
 | `msgpackFormat` | no | `map` | Wire layout for msgpack messages: `map` (keyed dictionaries) or `array` (positional). Only applies when `serialization=msgpack` |
-| `reconnect` | no | `true` | Generate auto-reconnect logic with exponential backoff (`true` or `false`) |
+| `reconnect` | no | `true` | Generate auto-reconnect logic — the injectable `ReconnectionPolicy`, the `onConnected` hook, and the reconnection loop (`true` or `false`; `false` removes the code from the output) |
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
 | `allowNameCollisions` | no | `"false"` | When `"true"`, allow multiple messages to share the same `name` field. Colliding messages are disambiguated using their component key (e.g. `order_preview_response`). Default is `"false"`, which treats collisions as a generation error. |
 | `perspective` | no | `"server"` | Perspective from which the AsyncAPI spec is written: `server` (default, standard AsyncAPI v3 — `action: send` means server-to-client) or `client` (`action: send` means client-to-server). |
@@ -101,8 +101,15 @@ await client.connect()
 
 // Observe connection state
 Task {
-    for await state in await client.stateStream {
+    for await state in await client.connectionState {
         print("Connection state: \(state)")
+    }
+}
+
+// Observe non-fatal errors (connection drops, ping failures, and dropped decode failures)
+Task {
+    for await error in await client.errors {
+        print("WebSocket error: \(error)")
     }
 }
 
@@ -245,6 +252,7 @@ Test fixtures live in `test/fixtures/` and cover:
 | `allof-outgoing.asyncapi.yaml` | `allOf` composition for outgoing messages — flattens `$ref` + inline properties into typed structs, enum extraction from composed schemas, const auto-assignment, `typePrefix` support |
 | `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
 | `dotted-enums.asyncapi.yaml` | Enum values containing dots (namespaced codes like `sensor.alarm.high_temperature`), dot-to-camelCase conversion, explicit raw value assignments |
+| `malicious-url-backslash.asyncapi.yaml` / `malicious-url-quote.asyncapi.yaml` | URL-injection hardening — server `host`/`pathname` values containing backslashes or quotes are escaped/handled safely when building the default connection URL |
 
 Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), `undecodableMessages` (yield/drop), and all combinations thereof.
 
@@ -283,6 +291,7 @@ cd output/basic && swift build
 - [ ] **WebSocket channel bindings** — read query parameters and channel-level headers from AsyncAPI bindings
 - [ ] **Security scheme generation** — generate auth helpers from AsyncAPI security schemes (API key, bearer, OAuth2)
 - [x] **Custom discriminator field** — auto-detected from the first `const` property in receive messages (e.g. `type`, `event_type`)
+- [x] **Injectable reconnection policy** — `ReconnectionPolicy` protocol (default exponential backoff), an `onConnected` re-subscribe hook, ping-failure-triggered reconnect, and an `errors` AsyncStream for non-fatal failures
 - [ ] **Linux / cross-platform support** — abstract the WebSocket transport to support `swift-nio` / `WebSocketKit` for server-side Swift
 - [ ] **Combine publisher option** — generate `@Published` / `AnyPublisher` observation alongside or instead of `AsyncStream`
 - [ ] **Protocol-based message handling** — generate a delegate protocol as an alternative to switch-based message dispatch
@@ -293,7 +302,7 @@ cd output/basic && swift build
 - [ ] **Protobuf serialization** — add a third serialization option using SwiftProtobuf
 - [ ] **Retry / queue for outgoing messages** — buffer sends when disconnected and flush on reconnect
 - [ ] **Connection health monitoring** — expose ping/pong latency and connection quality metrics
-- [ ] **Documentation comments** — generate `///` doc comments from AsyncAPI descriptions on all types and properties
+- [x] **Documentation comments** — generate `///` doc comments from AsyncAPI descriptions on types, struct properties, and message enum cases
 - [x] **Publish to npm** — published as `@finlayjn/asyncapi-swift-ws-template`
 - [ ] **Sample data** - generate `.sample` extensions based on `example` values in the AsyncAPI spec for easier testing and debugging
 
