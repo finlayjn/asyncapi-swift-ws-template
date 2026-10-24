@@ -2,7 +2,7 @@
 
 let _generationWarnings = [];
 
-function addWarning(msg) { _generationWarnings.push(msg); }
+function addWarning(msg) { if (!_generationWarnings.includes(msg)) _generationWarnings.push(msg); }
 function getWarnings() { return _generationWarnings; }
 function clearWarnings() { _generationWarnings.length = 0; }
 
@@ -41,6 +41,13 @@ function isAnonymousSchema(id) {
   if (!id) return true;
   return /^(<anonymous-schema-\d+>|AnonymousSchema\d+)$/i.test(id);
 }
+
+let _enumDefs = [];
+
+/**
+ * Register the extracted enums (from extractEnums) so nested enum schemas resolve to them.
+ */
+function setEnumDefs(defs) { _enumDefs = defs || []; }
 
 let _typePrefix = '';
 
@@ -177,11 +184,20 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineS
         return (hasNull || !isRequired) ? resolved.replace(/\?$/, '') + '?' : resolved;
       }
 
-      // Genuine multi-type anyOf — not yet supported, warn and fall through
-      addWarning(`[warn] Multi-type ${keyword} not fully supported for ${parentName || 'unknown'}, using JSONValue`);
-      const fallback = _prefixed('JSONValue');
-      return (hasNull || !isRequired) ? fallback + '?' : fallback;
+      // Genuine multi-type union: a primitive union or a discriminated object union becomes
+      // a generated enum; anything else falls back to JSONValue.
+      const union = _resolveUnion(prop, nonNull, parentName, inlineStructMap);
+      if (!union) {
+        addWarning(`[warn] Multi-type ${keyword} not fully supported for ${parentName || 'unknown'}, using JSONValue`);
+      }
+      const resolved = union || _prefixed('JSONValue');
+      return (hasNull || !isRequired) ? resolved + '?' : resolved;
     }
+  }
+
+  // allOf with a single member (typically a $ref plus a local description) is that member
+  if (Array.isArray(prop.allOf) && prop.allOf.length === 1 && !prop.properties && !prop.type) {
+    return jsonSchemaTypeToSwift({ ...prop.allOf[0], nullable: prop.nullable || prop.allOf[0].nullable }, isRequired, parentName, inlineStructMap);
   }
 
   let swiftType;
@@ -190,8 +206,13 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineS
   if (prop.const !== undefined) {
     swiftType = 'String';
   } else if (prop.enum) {
-    // Will be mapped to a dedicated Swift enum type
-    swiftType = 'String'; // placeholder, replaced by enum extraction
+    // A dedicated Swift enum type when extraction registered one (top-level properties are
+    // resolved by buildPropertyList; this covers array items and anyOf/oneOf variants).
+    const values = prop.enum.filter(v => v !== null);
+    const key = values.slice().sort().join('|');
+    const enumDef = values.length > 1 ? _enumDefs.find(e => e.values.slice().sort().join('|') === key) : null;
+    swiftType = enumDef ? enumDef.swiftName : 'String';
+    if (prop.enum.includes(null)) prop = { ...prop, nullable: true };
   } else {
     switch (prop.type) {
       case 'string':
@@ -210,7 +231,9 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineS
         swiftType = 'Bool';
         break;
       case 'array':
-        if (prop.items) {
+        if (!prop.items && prop.prefixItems) {
+          swiftType = _resolveTuple(prop, parentName) || `[${_prefixed('JSONValue')}]`;
+        } else if (prop.items) {
           // If the items has a real named schema id (resolved $ref, not anonymous), use that type
           if (prop.items._schemaId && !isAnonymousSchema(prop.items._schemaId) && prop.items.type === 'object') {
             swiftType = `[${toSwiftTypeName(prop.items._schemaId)}]`;
@@ -256,6 +279,138 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineS
     return swiftType + '?';
   }
   return swiftType;
+}
+
+// ── Unions (multi-type anyOf / oneOf) ──
+
+let _unions = new Map(); // swiftName → union definition, rendered by Models.js
+let _objectUnionsSupported = true;
+
+/**
+ * Reset the union registry. Object unions need keyed containers, so they are disabled for
+ * the msgpack array wire format.
+ */
+function resetUnions({ objectUnions = true } = {}) {
+  _unions = new Map();
+  _objectUnionsSupported = objectUnions;
+}
+
+function getUnions() { return Array.from(_unions.values()); }
+
+const PRIMITIVE_KINDS = {
+  boolean: { kind: 'bool', swiftType: 'Bool', order: 0 },
+  integer: { kind: 'int', swiftType: 'Int', order: 1 },
+  number: { kind: 'double', swiftType: 'Double', order: 2 },
+  string: { kind: 'string', swiftType: 'String', order: 3 },
+};
+
+/**
+ * Map a union's non-null variants to a generated Swift enum, registering it. Returns the
+ * Swift type name, or null when the union isn't one the template can model.
+ *
+ * - Primitive unions (e.g. string | integer) become an enum with one case per JSON type,
+ *   decoded in the order Bool, Int, Double, String.
+ * - Object unions whose variants share a property with a distinct `const` on each (a
+ *   discriminator) become an enum with one case per variant plus `unknown(String)`.
+ *
+ * A union declared as a named component schema takes that schema's name; an inline one is
+ * named after its JSON types (primitives) or its property (objects).
+ */
+function _resolveUnion(prop, variants, parentName, inlineStructMap) {
+  const schemaName = prop._schemaId && !isAnonymousSchema(prop._schemaId) ? toSwiftTypeName(prop._schemaId) : null;
+
+  // Variants that only differ by enum, const or pattern but share one JSON type are that type
+  const variantTypes = variants.map(v => (!v.properties && !v.oneOf && !v.anyOf && !v.items) ? v.type : null);
+  if (variantTypes.every(t => t && PRIMITIVE_KINDS[t]) && new Set(variantTypes).size === 1) {
+    return PRIMITIVE_KINDS[variantTypes[0]].swiftType;
+  }
+
+  const primitives = variants.map(v => (!v.properties && !v.enum && v.const === undefined && !v.oneOf && !v.anyOf) ? PRIMITIVE_KINDS[v.type] : null);
+  if (primitives.every(Boolean)) {
+    const kinds = [...new Map(primitives.map(p => [p.kind, p])).values()].sort((a, b) => a.order - b.order);
+    if (kinds.length === 1) return kinds[0].swiftType;
+    const name = schemaName || _prefixed(kinds.map(k => k.swiftType).join('Or'));
+    if (!_unions.has(name)) _unions.set(name, { kind: 'primitive', swiftName: name, cases: kinds, description: prop.description || '' });
+    return name;
+  }
+
+  if (!_objectUnionsSupported) return null;
+  if (!variants.every(v => (v.type === 'object' || !v.type) && v.properties)) return null;
+
+  // The discriminator: the first property every variant declares with a distinct const
+  const candidateKeys = Object.keys(variants[0].properties);
+  const key = candidateKeys.find(k => {
+    const consts = variants.map(v => v.properties[k] && v.properties[k].const);
+    return consts.every(c => c !== undefined && c !== null) && new Set(consts.map(String)).size === consts.length;
+  });
+  if (!key) return null;
+
+  const cases = variants.map(v => {
+    const typeName = v._schemaId && !isAnonymousSchema(v._schemaId)
+      ? toSwiftTypeName(v._schemaId)
+      : _resolveInlineObject(v, '', inlineStructMap);
+    const value = String(v.properties[key].const);
+    return { value, caseName: toSwiftEnumCase(value), swiftType: typeName };
+  });
+  if (cases.some(c => !c.swiftType || c.swiftType === _prefixed('JSONValue'))) return null;
+
+  const name = schemaName || _withoutRepeatedPrefix(parentName);
+  const existing = _unions.get(name);
+  if (existing && existing.cases.map(c => c.value).join('|') !== cases.map(c => c.value).join('|')) {
+    addWarning(`[warn] Two different unions resolve to the name ${name}, using JSONValue for the second`);
+    return null;
+  }
+  if (!existing) _unions.set(name, { kind: 'object', swiftName: name, discriminator: key, cases, description: prop.description || '' });
+  return name;
+}
+
+/**
+ * The name of a tuple element: its `title`, else a description that is an identifier,
+ * else `item_<index>`.
+ */
+function tupleElementLabel(item, index) {
+  if (item.title) return item.title;
+  return /^[a-z][a-z0-9_]*$/i.test(item.description || '') ? item.description : `item_${index}`;
+}
+
+/**
+ * Register a positional tuple (an array with mixed-type prefixItems) as a struct encoded as
+ * an array. Element names come from each item's `title`, else a description that is an
+ * identifier, else `itemN`. Returns null when an element isn't a primitive.
+ */
+function _resolveTuple(prop, parentName) {
+  const fields = [];
+  for (const [i, item] of prop.prefixItems.entries()) {
+    const kind = PRIMITIVE_KINDS[item.type];
+    if (!kind) return null;
+    let swiftType = kind.swiftType;
+    const values = Array.isArray(item.enum) ? item.enum.filter(v => v !== null) : [];
+    if (values.length > 1) {
+      const key = values.slice().sort().join('|');
+      const enumDef = _enumDefs.find(e => e.values.slice().sort().join('|') === key);
+      if (enumDef) swiftType = enumDef.swiftName;
+    }
+    const label = tupleElementLabel(item, i);
+    fields.push({ swiftName: toSwiftPropertyName(label), swiftType, description: item.title ? (item.description || '') : '' });
+  }
+  const name = prop._schemaId && !isAnonymousSchema(prop._schemaId) ? toSwiftTypeName(prop._schemaId) : _withoutRepeatedPrefix(parentName);
+  const signature = fields.map(f => `${f.swiftName}:${f.swiftType}`).join('|');
+  const existing = _unions.get(name);
+  if (existing && existing.signature !== signature) {
+    addWarning(`[warn] Two different tuples resolve to the name ${name}, using [JSONValue] for the second`);
+    return null;
+  }
+  if (!existing) _unions.set(name, { kind: 'tuple', swiftName: name, fields, signature, description: prop.description || '' });
+  return name;
+}
+
+/**
+ * Inline names are built as parent type + property type, which repeats the type prefix
+ * (`POGOrderPOGEvents`); drop the repeat for generated union names.
+ */
+function _withoutRepeatedPrefix(name) {
+  if (!_typePrefix || !name.startsWith(_typePrefix)) return name;
+  return _typePrefix + name.slice(_typePrefix.length).split(_typePrefix).join('');
 }
 
 /**
@@ -372,6 +527,10 @@ module.exports = {
   escapeSwiftKeyword,
   setTypePrefix,
   getTypePrefix,
+  setEnumDefs,
+  resetUnions,
+  getUnions,
+  tupleElementLabel,
   prefixedName,
   isAnonymousSchema,
   addWarning,

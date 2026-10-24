@@ -1,7 +1,7 @@
 // helpers/schema.js — Extract messages, schemas, and enums from parsed AsyncAPI v3 document
 // Parser v3 API: collections have .all() returning arrays, schemas have method-based accessors
 
-const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection, swiftStringEscape } = require('./swift');
+const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection, swiftStringEscape, tupleElementLabel } = require('./swift');
 
 /**
  * Apply the current type prefix to a base name.
@@ -187,7 +187,36 @@ function extractMessages(asyncapi) {
     }
   }
 
+  _avoidSchemaNameCollisions(asyncapi, messages);
   return messages;
+}
+
+/**
+ * A message struct is named after the message, so a message called `fill` whose payload is
+ * the `FillMessage` schema would take the name of an unrelated `Fill` component schema, and
+ * the two structs would collapse into one that contains itself. Rename such message structs
+ * after their payload schema (or `<Name>Message` when the payload is anonymous).
+ */
+function _avoidSchemaNameCollisions(asyncapi, messages) {
+  const components = asyncapi.components && asyncapi.components();
+  const componentSchemas = components && components.schemas();
+  const all = componentSchemas && typeof componentSchemas.all === 'function' ? componentSchemas.all() : [];
+  const schemaIdsByName = new Map(all.map(sch => [toSwiftTypeName(sch.id()), sch.id()]));
+
+  for (const msg of messages) {
+    const schemaId = schemaIdsByName.get(msg.swiftName);
+    if (!schemaId || !msg.hasObjectPayload) continue;
+    const payloadId = call(msg.payload, 'id');
+    if (payloadId === schemaId) continue;
+    const renamed = payloadId && !isAnonymousSchema(payloadId)
+      ? toSwiftTypeName(payloadId)
+      : toSwiftTypeName(msg.messageName + '_message');
+    addWarning(
+      `[warn] Message "${msg.messageName}" would share the Swift name ${msg.swiftName} with ` +
+      `component schema "${schemaId}"; naming the message struct ${renamed}.`
+    );
+    msg.swiftName = renamed;
+  }
 }
 
 /**
@@ -283,8 +312,19 @@ function schemaToPlain(schema) {
       const types = raw.prefixItems.map(pi => pi.type).filter(Boolean);
       if (types.length === raw.prefixItems.length && new Set(types).size === 1) {
         plain.items = { type: types[0] };
+      } else {
+        // Mixed element types: a positional tuple, generated as a struct
+        plain.prefixItems = raw.prefixItems;
       }
     }
+  }
+
+  // allOf of several object schemas (e.g. a $ref plus extra properties): merge them, so the
+  // composition resolves like an inline object
+  if (!plain.properties && Array.isArray(plain.allOf) && plain.allOf.length > 1 && plain.allOf.every(v => v.properties)) {
+    plain.properties = Object.assign({}, ...plain.allOf.map(v => v.properties));
+    plain.required = [...new Set(plain.allOf.flatMap(v => v.required || []))];
+    plain.type = plain.type || 'object';
   }
 
   const minI = call(schema, 'minItems');
@@ -300,68 +340,136 @@ function schemaToPlain(schema) {
  */
 function extractEnums(asyncapi) {
   const enumMap = new Map(); // key: sorted values, value: enum info
-  const nameCount = new Map(); // track name collisions
   const allMessages = extractMessages(asyncapi);
   const allSchemas = extractSchemas(asyncapi);
+  const roots = [
+    ...allMessages.filter(m => m.payload).map(m => [m.payload, toSwiftBaseTypeName(m.messageName || '')]),
+    ...allSchemas.map(s => [s.schema, toSwiftBaseTypeName(s.schemaName || '')]),
+  ];
 
-  for (const msg of allMessages) {
-    if (!msg.payload) continue;
-    scanForEnums(msg.payload, toSwiftBaseTypeName(msg.messageName || ''), enumMap, nameCount);
+  for (const [schema, contextName] of roots) {
+    scanForEnums(schema, contextName, enumMap);
   }
 
-  for (const sch of allSchemas) {
-    scanForEnums(sch.schema, toSwiftBaseTypeName(sch.schemaName || ''), enumMap, nameCount);
+  // Second pass: enums the first pass doesn't reach (array items, anyOf/oneOf variants,
+  // objects nested inside arrays). It runs after the first pass so that enums found there
+  // keep the names they had before this pass existed.
+  for (const [schema, contextName] of roots) {
+    scanDeep(schema, contextName, (node, propName, ctx) => {
+      const values = enumValuesOf(node);
+      if (values) _registerEnum(values, propName, ctx, enumMap);
+    });
   }
 
   return Array.from(enumMap.values());
 }
 
 /**
- * Recursively scan a schema for enum properties.
+ * The enum values of a schema without `null` (a null member makes the property optional
+ * rather than adding a case). Returns null unless the schema is an enum of two or more values.
  */
-function scanForEnums(schema, contextName, enumMap, nameCount) {
-  if (!schema) return;
+function enumValuesOf(schema) {
+  const values = call(schema, 'enum');
+  if (!Array.isArray(values) || call(schema, 'const') !== undefined) return null;
+  const nonNull = values.filter(v => v !== null);
+  return nonNull.length > 1 ? nonNull : null;
+}
 
-  // Try direct properties
-  let props = null;
-  if (typeof schema.properties === 'function') {
-    props = schema.properties();
+/**
+ * Key identifying an enum by its values, shared by extraction and type lookup.
+ */
+function enumKey(values) {
+  return values.filter(v => v !== null).slice().sort().join('|');
+}
+
+function _registerEnum(enumValues, propName, contextName, enumMap) {
+  const key = enumKey(enumValues);
+  if (enumMap.has(key)) return;
+  const allIntegers = enumValues.every(v => typeof v === 'number' && Number.isInteger(v));
+  // Disambiguate: if a different enum already uses this property name, prefix with context
+  // Use base names (no type prefix) for context building; prefix is applied via toSwiftTypeName at usage sites
+  let baseName = toSwiftBaseTypeName(propName);
+  const existingWithName = Array.from(enumMap.values()).find(e => e.baseName === baseName);
+  if (existingWithName) {
+    baseName = contextName + baseName;
   }
+  enumMap.set(key, {
+    enumName: propName,
+    baseName,
+    swiftName: _applyPrefix(baseName),
+    values: enumValues,
+    rawType: allIntegers ? 'Int' : 'String',
+  });
+}
 
-  // If no direct properties, try flattening allOf
-  if ((!props || Object.keys(props).length === 0)) {
+/**
+ * The properties of an object schema, flattening allOf. Null when it has none.
+ */
+function _propertiesOf(schema) {
+  if (!schema) return null;
+  let props = typeof schema.properties === 'function' ? schema.properties() : null;
+  if (!props || Object.keys(props).length === 0) {
     const flattened = flattenAllOf(schema);
-    if (flattened) {
-      props = flattened.properties;
-    }
+    props = flattened ? flattened.properties : null;
   }
+  return props && Object.keys(props).length > 0 ? props : null;
+}
 
+/**
+ * Walk every schema reachable through a schema's properties, at any depth: each property
+ * schema, array items (including arrays of arrays), anyOf/oneOf variants, and the properties
+ * of nested objects. Calls `visit(node, propName, contextName)` for each node, where
+ * propName is the property it belongs to and contextName the base type name of the object
+ * declaring that property. Named component schemas are descended into once.
+ */
+function scanDeep(schema, contextName, visit, seen = new Set()) {
+  const props = _propertiesOf(schema);
   if (!props) return;
 
   for (const [propName, propSchema] of Object.entries(props)) {
-    const enumValues = call(propSchema, 'enum') || null;
-    const constVal = call(propSchema, 'const');
+    const pending = [propSchema];
+    while (pending.length > 0) {
+      const node = pending.shift();
+      if (!node) continue;
+      visit(node, propName, contextName);
 
-    if (enumValues && enumValues.length > 1 && constVal === undefined) {
-      const allIntegers = enumValues.every(v => typeof v === 'number' && Number.isInteger(v));
-      const rawType = allIntegers ? 'Int' : 'String';
-      const key = enumValues.slice().sort().join('|');
-      if (!enumMap.has(key)) {
-        // Disambiguate: if a different enum already uses this property name, prefix with context
-        // Use base names (no type prefix) for context building; prefix is applied via toSwiftTypeName at usage sites
-        let baseName = toSwiftBaseTypeName(propName);
-        const existingWithName = Array.from(enumMap.values()).find(e => e.baseName === baseName);
-        if (existingWithName) {
-          baseName = contextName + baseName;
-        }
-        enumMap.set(key, {
-          enumName: propName,
-          baseName,
-          swiftName: _applyPrefix(baseName),
-          values: enumValues,
-          rawType,
-        });
+      // Tuple elements (prefixItems) are only in the raw JSON; visit them under their labels
+      const raw = typeof node.json === 'function' ? node.json() : null;
+      if (raw && Array.isArray(raw.prefixItems)) {
+        raw.prefixItems.forEach((item, i) => visit(item, tupleElementLabel(item, i), contextName));
       }
+
+      if (typeof node.items === 'function') {
+        const items = node.items();
+        if (items && !Array.isArray(items)) pending.push(items);
+      }
+      for (const keyword of ['anyOf', 'oneOf']) {
+        if (typeof node[keyword] !== 'function') continue;
+        const variants = node[keyword]();
+        if (Array.isArray(variants)) pending.push(...variants);
+      }
+      if (_propertiesOf(node)) {
+        const id = call(node, 'id');
+        const named = id && !isAnonymousSchema(id);
+        if (named && seen.has(id)) continue;
+        if (named) seen.add(id);
+        scanDeep(node, contextName + toSwiftBaseTypeName(propName), visit, seen);
+      }
+    }
+  }
+}
+
+/**
+ * Recursively scan a schema for enum properties.
+ */
+function scanForEnums(schema, contextName, enumMap) {
+  const props = _propertiesOf(schema);
+  if (!props) return;
+
+  for (const [propName, propSchema] of Object.entries(props)) {
+    const enumValues = enumValuesOf(propSchema);
+    if (enumValues) {
+      _registerEnum(enumValues, propName, contextName, enumMap);
     }
 
     const propType = call(propSchema, 'type');
@@ -468,12 +576,13 @@ function buildPropertyList(schema, parentSwiftName, enumDefs, inlineStructMap) {
     const swiftPropName = toSwiftPropertyName(propName);
 
     let swiftType;
-    if (plain.enum && !plain.const && plain.enum.length > 1) {
+    const enumValues = enumValuesOf(propSchema);
+    if (enumValues) {
       // Look up the actual enum type name from extracted enums
-      const enumKey = plain.enum.slice().sort().join('|');
-      const enumDef = enumDefs && enumDefs.find(e => e.values.slice().sort().join('|') === enumKey);
+      const key = enumKey(enumValues);
+      const enumDef = enumDefs && enumDefs.find(e => enumKey(e.values) === key);
       swiftType = enumDef ? enumDef.swiftName : toSwiftTypeName(propName);
-      if (!isRequired || plain.nullable) swiftType += '?';
+      if (!isRequired || plain.nullable || plain.enum.includes(null)) swiftType += '?';
     } else {
       swiftType = jsonSchemaTypeToSwift(plain, isRequired, parentSwiftName + toSwiftTypeName(propName), inlineStructMap);
     }
@@ -682,7 +791,10 @@ function extractInlineStructs(asyncapi) {
       // Derive name from property name; if collision with parent, prefix with parent
       const baseName = toSwiftBaseTypeName(propName);
       const existingNames = new Set(Array.from(map.values()).map(v => v.baseName));
-      const finalBase = existingNames.has(baseName) ? parentBaseName + baseName : baseName;
+      let finalBase = existingNames.has(baseName) ? parentBaseName + baseName : baseName;
+      for (let n = 2; existingNames.has(finalBase); n++) {
+        finalBase = parentBaseName + baseName + n;
+      }
       map.set(key, {
         baseName: finalBase,
         swiftName: _applyPrefix(finalBase),
@@ -701,6 +813,23 @@ function extractInlineStructs(asyncapi) {
     scanSchema(sch.schema, toSwiftBaseTypeName(sch.schemaName || ''));
   }
 
+  // Second pass: inline objects the first pass doesn't reach (inside array items or
+  // anyOf/oneOf variants of nested objects, arrays of arrays). After the first pass so
+  // existing struct names don't change.
+  const roots = [
+    ...messages.filter(m => m.payload).map(m => [m.payload, toSwiftBaseTypeName(m.messageName || '')]),
+    ...schemas.map(sch => [sch.schema, toSwiftBaseTypeName(sch.schemaName || '')]),
+  ];
+  for (const [schema, contextName] of roots) {
+    scanDeep(schema, contextName, (node, propName, ctx) => {
+      const type = call(node, 'type');
+      const isObject = [].concat(type).includes('object') || (type === undefined && _propertiesOf(node));
+      if (isObject && isAnonymousSchema(call(node, 'id'))) {
+        _registerInlineObject(node, propName, ctx, structMap);
+      }
+    });
+  }
+
   return structMap;
 }
 
@@ -712,6 +841,9 @@ module.exports = {
   buildPropertyList,
   buildServerURL,
   scanForEnums,
+  scanDeep,
+  enumValuesOf,
+  enumKey,
   collectReceiveSchemaNames,
   extractInlineStructs,
 };

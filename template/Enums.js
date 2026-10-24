@@ -1,7 +1,7 @@
 // template/Enums.js — Generates shared Swift enum types from enum properties
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftEnumCase, setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
+const { toSwiftEnumCase, setTypePrefix, setAllowNameCollisions, prefixedName, swiftStringEscape, addWarning } = require('../helpers/swift');
 const { extractEnums } = require('../helpers/schema');
 
 function Enums({ asyncapi, params }) {
@@ -9,24 +9,10 @@ function Enums({ asyncapi, params }) {
   setAllowNameCollisions(params?.allowNameCollisions);
   const enums = extractEnums(asyncapi);
   if (enums.length === 0) return null;
+  const openEnums = params?.openEnums === 'true' || params?.openEnums === true;
 
-  const enumBlocks = enums.map(e => {
-    const cases = e.values.map(v => {
-      const caseName = toSwiftEnumCase(v);
-      const cleanCase = caseName.replace(/`/g, '');
-      if (e.rawType === 'Int') {
-        return `    case ${caseName} = ${v}`;
-      }
-      if (cleanCase !== String(v)) {
-        return `    case ${caseName} = "${v}"`;
-      }
-      return `    case ${caseName}`;
-    });
-
-    return `public enum ${e.swiftName}: ${e.rawType}, Codable, Sendable {
-${cases.join('\n')}
-}`;
-  });
+  const enumBlocks = enums.map(e => openEnums ? renderOpenEnum(e) : renderClosedEnum(e));
+  if (openEnums) enumBlocks.unshift(renderUnknownEnumValue());
 
   return (
     <File name="Sources/Enums.swift">
@@ -36,6 +22,110 @@ import Foundation
 ${enumBlocks.join('\n\n')}`}</Text>
     </File>
   );
+}
+
+function caseLines(e) {
+  return e.values.map(v => ({ value: v, caseName: toSwiftEnumCase(v) }));
+}
+
+function renderClosedEnum(e) {
+  const cases = caseLines(e).map(({ value: v, caseName }) => {
+    const cleanCase = caseName.replace(/`/g, '');
+    if (e.rawType === 'Int') {
+      return `    case ${caseName} = ${v}`;
+    }
+    if (cleanCase !== String(v)) {
+      return `    case ${caseName} = "${swiftStringEscape(v)}"`;
+    }
+    return `    case ${caseName}`;
+  });
+
+  return `public enum ${e.swiftName}: ${e.rawType}, Codable, Sendable {
+${cases.join('\n')}
+}`;
+}
+
+/**
+ * An open enum: the spec's cases plus `unknown(RawValue)`, so a value added by the server
+ * decodes instead of failing the whole message. Unknown values are reported through the
+ * decoder's userInfo (see UnknownEnumValue) and round-trip unchanged when encoded.
+ */
+function renderOpenEnum(e) {
+  const cases = caseLines(e);
+  const raw = e.rawType;
+  const literal = v => raw === 'Int' ? String(v) : `"${swiftStringEscape(v)}"`;
+  const taken = new Set(cases.map(c => c.caseName.replace(/`/g, '')));
+  let unknownCase = 'unknown';
+  if (taken.has(unknownCase)) {
+    unknownCase = 'unknownValue';
+    addWarning(`[warn] Enum ${e.swiftName} has a value named "unknown"; its fallback case is unknownValue`);
+  }
+  const reporter = prefixedName('UnknownEnumValue');
+
+  return `public enum ${e.swiftName}: RawRepresentable, CaseIterable, Codable, Sendable, Hashable {
+${cases.map(c => `    case ${c.caseName}`).join('\n')}
+    /// A value this version of the client doesn't know.
+    case ${unknownCase}(${raw})
+
+    /// The cases the spec defines (\`${unknownCase}\` excluded).
+    public static let allCases: [${e.swiftName}] = [${cases.map(c => `.${c.caseName}`).join(', ')}]
+
+    public init(rawValue: ${raw}) {
+        switch rawValue {
+${cases.map(c => `        case ${literal(c.value)}: self = .${c.caseName}`).join('\n')}
+        default: self = .${unknownCase}(rawValue)
+        }
+    }
+
+    public var rawValue: ${raw} {
+        switch self {
+${cases.map(c => `        case .${c.caseName}: ${literal(c.value)}`).join('\n')}
+        case .${unknownCase}(let value): value
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(${raw}.self)
+        self.init(rawValue: value)
+        if case .${unknownCase} = self {
+            ${reporter}.report(type: "${e.swiftName}", value: ${raw === 'Int' ? 'String(value)' : 'value'}, decoder: decoder)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}`;
+}
+
+function renderUnknownEnumValue() {
+  const name = prefixedName('UnknownEnumValue');
+  return `/// An enum value the client didn't know, met while decoding. Pass a handler to the
+/// serializer (or set one under \`handlerKey\` in a decoder's userInfo) to report them, so
+/// new server values show up in monitoring instead of failing to decode.
+public struct ${name}: Sendable, Hashable, CustomStringConvertible {
+    /// The Swift enum type.
+    public let type: String
+    /// The raw value received.
+    public let value: String
+    /// Where in the message it was found.
+    public let codingPath: [String]
+
+    public var description: String {
+        "\\(type): unknown value \\"\\(value)\\" at \\(codingPath.joined(separator: "."))"
+    }
+
+    public typealias Handler = @Sendable (${name}) -> Void
+
+    /// userInfo key for a \`Handler\`.
+    public static let handlerKey = CodingUserInfoKey(rawValue: "${name}.handler")!
+
+    static func report(type: String, value: String, decoder: Decoder) {
+        guard let handler = decoder.userInfo[handlerKey] as? Handler else { return }
+        handler(${name}(type: type, value: value, codingPath: decoder.codingPath.map(\\.stringValue)))
+    }
+}`;
 }
 
 module.exports = Enums;

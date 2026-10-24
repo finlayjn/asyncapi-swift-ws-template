@@ -1,0 +1,190 @@
+asyncapi: 3.0.0
+info:
+  title: Unions And Nesting WS
+  version: 1.0.0
+  description: >
+    Exercises the 1.4.0 schema handling: enums with a null member, enums in arrays and
+    variants, inline objects nested in arrays, primitive and discriminated unions, positional
+    tuples, allOf compositions, and a message whose name collides with a component schema.
+
+servers:
+  local:
+    host: localhost:9200
+    protocol: ws
+
+channels:
+  main:
+    address: /
+    messages:
+      placeOrder:
+        $ref: "#/components/messages/PlaceOrder"
+      fill:
+        $ref: "#/components/messages/Fill"
+      accountSnapshot:
+        $ref: "#/components/messages/AccountSnapshot"
+
+operations:
+  receiveFromClient:
+    action: receive
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/placeOrder"
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/fill"
+      - $ref: "#/channels/main/messages/accountSnapshot"
+
+components:
+  messages:
+    PlaceOrder:
+      name: place_order
+      payload:
+        $ref: "#/components/schemas/PlaceOrderPayload"
+    Fill:
+      name: fill
+      payload:
+        $ref: "#/components/schemas/FillMessage"
+    AccountSnapshot:
+      name: account_snapshot
+      payload:
+        $ref: "#/components/schemas/AccountSnapshotPayload"
+
+  schemas:
+    PlaceOrderPayload:
+      type: object
+      required: [type, sub_id, quantity, side]
+      properties:
+        type: { type: string, const: place_order }
+        sub_id: { $ref: "#/components/schemas/SubId" }
+        quantity: { $ref: "#/components/schemas/U128StringOrInteger" }
+        side:
+          type: string
+          enum: [buy, sell]
+        channel:
+          description: A fixed channel name or a parameterised one.
+          oneOf:
+            - type: string
+              enum: [capabilities, listings]
+            - type: string
+              pattern: "^price:[0-9]+$"
+
+    U128StringOrInteger:
+      description: A u128 amount, as a decimal string or an integer.
+      oneOf:
+        - type: string
+          pattern: "^[0-9]+$"
+        - type: integer
+          minimum: 0
+
+    SubId:
+      type: array
+      minItems: 4
+      maxItems: 4
+      prefixItems:
+        - type: integer
+          description: underlying_id
+        - type: integer
+          description: expiry_ts
+        - type: string
+          title: strike
+          description: Strike in contract units.
+        - type: string
+          description: right
+          enum: [call, put]
+
+    Fill:
+      type: object
+      required: [execution_id, price]
+      properties:
+        execution_id: { type: string }
+        price: { type: string }
+
+    FillMessage:
+      type: object
+      required: [type, account_id, fill]
+      properties:
+        type: { type: string, const: fill }
+        account_id: { type: string }
+        fill: { $ref: "#/components/schemas/Fill" }
+
+    OrderFilled:
+      type: object
+      required: [type, order_id, quantity]
+      properties:
+        type: { type: string, const: order_filled }
+        order_id: { type: string }
+        quantity: { $ref: "#/components/schemas/U128StringOrInteger" }
+
+    OrderCancelled:
+      type: object
+      required: [type, order_id, reason]
+      properties:
+        type: { type: string, const: order_cancelled }
+        order_id: { type: string }
+        reason:
+          type: string
+          enum: [user, expired, risk]
+
+    GatewayEvent:
+      description: One account event.
+      oneOf:
+        - $ref: "#/components/schemas/OrderFilled"
+        - $ref: "#/components/schemas/OrderCancelled"
+
+    HistoryEntry:
+      type: object
+      required: [event_id]
+      properties:
+        event_id: { type: string }
+
+    AccountSnapshotPayload:
+      type: object
+      required: [type, positions, events, entries]
+      properties:
+        type: { type: string, const: account_snapshot }
+        status:
+          type: [string, "null"]
+          enum: [open, closed, settling, null]
+        tags:
+          type: array
+          items:
+            type: string
+            enum: [vip, new_user]
+        positions:
+          type: array
+          items:
+            type: object
+            required: [market, legs]
+            properties:
+              market: { type: string }
+              legs:
+                type: array
+                items:
+                  type: object
+                  required: [strike, liquidity]
+                  properties:
+                    strike: { type: string }
+                    liquidity:
+                      type: string
+                      enum: [maker, taker]
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/GatewayEvent"
+        entries:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/HistoryEntry"
+              - type: object
+                required: [source]
+                properties:
+                  source: { type: string }
+        balance:
+          description: Account balance as a decimal string.
+          allOf:
+            - type: string

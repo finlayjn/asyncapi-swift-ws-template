@@ -1,7 +1,7 @@
 // template/Models.js — Generates Swift struct for each message payload and component schema
 
 const { File, Text } = require('@asyncapi/generator-react-sdk');
-const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix, setAllowNameCollisions, setPerspective, clientDirection, getWarnings, clearWarnings, prefixedName } = require('../helpers/swift');
+const { toSwiftTypeName, toSwiftPropertyName, toSwiftEnumCase, jsonSchemaTypeToSwift, setTypePrefix, setAllowNameCollisions, setPerspective, clientDirection, getWarnings, clearWarnings, prefixedName, setEnumDefs, resetUnions, getUnions } = require('../helpers/swift');
 const { extractMessages, extractSchemas, extractEnums, buildPropertyList, collectReceiveSchemaNames, extractInlineStructs } = require('../helpers/schema');
 
 /**
@@ -144,6 +144,102 @@ function renderStruct(swiftName, properties, description, options = {}) {
 }
 
 /**
+ * Render a union registered by jsonSchemaTypeToSwift: a primitive union (one case per JSON
+ * type) or a discriminated object union (one case per variant, plus `unknown`).
+ */
+function renderUnion(union) {
+  const lines = [];
+  if (union.description) lines.push(`/// ${union.description.split('\n')[0]}`);
+
+  if (union.kind === 'primitive') {
+    lines.push(`public enum ${union.swiftName}: Codable, Sendable, Hashable {`);
+    for (const c of union.cases) lines.push(`    case ${c.kind}(${c.swiftType})`);
+    lines.push('');
+    lines.push('    public init(from decoder: Decoder) throws {');
+    lines.push('        let container = try decoder.singleValueContainer()');
+    for (const c of union.cases) {
+      lines.push(`        if let value = try? container.decode(${c.swiftType}.self) {`);
+      lines.push(`            self = .${c.kind}(value)`);
+      lines.push('            return');
+      lines.push('        }');
+    }
+    lines.push('        throw DecodingError.typeMismatch(');
+    lines.push(`            ${union.swiftName}.self,`);
+    lines.push(`            DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Expected ${union.cases.map(c => c.swiftType).join(' or ')}")`);
+    lines.push('        )');
+    lines.push('    }');
+    lines.push('');
+    lines.push('    public func encode(to encoder: Encoder) throws {');
+    lines.push('        var container = encoder.singleValueContainer()');
+    lines.push('        switch self {');
+    for (const c of union.cases) lines.push(`        case .${c.kind}(let value): try container.encode(value)`);
+    lines.push('        }');
+    lines.push('    }');
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  if (union.kind === 'tuple') {
+    lines.push(`public struct ${union.swiftName}: Codable, Sendable, Hashable {`);
+    for (const f of union.fields) {
+      if (f.description) lines.push(`    /// ${f.description.split('\n')[0]}`);
+      lines.push(`    public let ${f.swiftName}: ${f.swiftType}`);
+    }
+    lines.push('');
+    lines.push('    public init(');
+    union.fields.forEach((f, i) => lines.push(`        ${f.swiftName}: ${f.swiftType}${i < union.fields.length - 1 ? ',' : ''}`));
+    lines.push('    ) {');
+    for (const f of union.fields) lines.push(`        self.${f.swiftName} = ${f.swiftName}`);
+    lines.push('    }');
+    lines.push('');
+    lines.push('    /// Decoded from a positional array.');
+    lines.push('    public init(from decoder: Decoder) throws {');
+    lines.push('        var container = try decoder.unkeyedContainer()');
+    for (const f of union.fields) lines.push(`        self.${f.swiftName} = try container.decode(${f.swiftType}.self)`);
+    lines.push('    }');
+    lines.push('');
+    lines.push('    public func encode(to encoder: Encoder) throws {');
+    lines.push('        var container = encoder.unkeyedContainer()');
+    for (const f of union.fields) lines.push(`        try container.encode(${f.swiftName})`);
+    lines.push('    }');
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  const key = union.discriminator;
+  lines.push(`public enum ${union.swiftName}: Codable, Sendable {`);
+  for (const c of union.cases) lines.push(`    case ${c.caseName}(${c.swiftType})`);
+  lines.push(`    /// A variant whose \`${key}\` this client version doesn't know.`);
+  lines.push('    case unknown(String)');
+  lines.push('');
+  lines.push('    private enum DiscriminatorKey: String, CodingKey {');
+  lines.push(`        case discriminator = "${key}"`);
+  lines.push('    }');
+  lines.push('');
+  lines.push('    public init(from decoder: Decoder) throws {');
+  lines.push('        let container = try decoder.container(keyedBy: DiscriminatorKey.self)');
+  lines.push('        let discriminator = try container.decode(String.self, forKey: .discriminator)');
+  lines.push('        switch discriminator {');
+  for (const c of union.cases) {
+    lines.push(`        case "${c.value}": self = .${c.caseName}(try ${c.swiftType}(from: decoder))`);
+  }
+  lines.push('        default: self = .unknown(discriminator)');
+  lines.push('        }');
+  lines.push('    }');
+  lines.push('');
+  lines.push('    public func encode(to encoder: Encoder) throws {');
+  lines.push('        switch self {');
+  for (const c of union.cases) lines.push(`        case .${c.caseName}(let value): try value.encode(to: encoder)`);
+  lines.push('        case .unknown(let discriminator):');
+  lines.push('            var container = encoder.container(keyedBy: DiscriminatorKey.self)');
+  lines.push('            try container.encode(discriminator, forKey: .discriminator)');
+  lines.push('        }');
+  lines.push('    }');
+  lines.push('}');
+  return lines.join('\n');
+}
+
+/**
  * Render the JSONValue enum — a Codable catch-all for untyped schemas.
  */
 function renderJSONValue(prefix) {
@@ -205,6 +301,8 @@ function Models({ asyncapi, params }) {
   const messages = extractMessages(asyncapi);
   const schemas = extractSchemas(asyncapi);
   const enumDefs = extractEnums(asyncapi);
+  setEnumDefs(enumDefs);
+  resetUnions({ objectUnions: !msgpackArray });
   const inlineStructMap = extractInlineStructs(asyncapi);
   const renderedStructs = [];
   const generatedNames = new Set();
@@ -268,6 +366,11 @@ function Models({ asyncapi, params }) {
       unkeyedDecode: needsUnkeyed,
       containerInit: false,
     }));
+  }
+
+  // Unions registered while resolving property types above
+  for (const union of getUnions()) {
+    renderedStructs.push(renderUnion(union));
   }
 
   // Check if JSONValue is referenced by any generated struct

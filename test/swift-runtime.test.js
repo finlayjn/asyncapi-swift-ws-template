@@ -83,3 +83,22 @@ describe('Swift runtime tests — basic spec (JSON + reconnect)', () => {
     assert.ok(passCount > 0, `should have at least 1 passing test, got ${passCount}`);
   });
 });
+
+describe('Swift runtime tests — unions, nesting and open enums', () => {
+  let out;
+  const testFile = path.join(__dirname, 'swift-tests', 'UnionTests.swift');
+
+  before(() => {
+    out = generate('unions-and-nesting.asyncapi.yaml', { server: 'local', packageName: 'RuntimeTestUnions', openEnums: 'true' });
+    injectTestMain(out, testFile);
+  });
+
+  it('compiles and runs with all tests passing', () => {
+    const result = swiftRun(out);
+    if (!result.success) {
+      console.log(result.output);
+    }
+    assert.ok(result.success, `Swift runtime tests failed:\n${result.output}`);
+    assert.ok(result.output.includes(' 0 failed'), `Some Swift tests failed:\n${result.output}`);
+  });
+});

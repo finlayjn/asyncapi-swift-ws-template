@@ -13,10 +13,13 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Type prefix** — optional prefix for all generated types to avoid naming collisions in multi-module projects
 - **Discriminated decoding** — incoming messages are decoded via an auto-detected discriminator field (e.g. `type`, `event_type`) into a tagged enum, using the `const` values from the schema for matching. When both object and plain-string messages exist, the decoder tries the keyed container first and falls back to `singleValueContainer` in a `catch` block — this avoids a Swift `Decoder` crash where `singleValueContainer()` (which never throws) would register the top-level container and block subsequent `container(keyedBy:)` calls
 - **`allOf` composition** — messages using `allOf` (e.g. combining a base schema via `$ref` with additional properties) are flattened into a single struct with all properties merged. Enum extraction and inline struct scanning also traverse `allOf` sub-schemas
-- **`anyOf` / `oneOf` support** — `anyOf [Type, null]` maps to `Type?` (optional); multi-type `anyOf` maps to a generated `JSONValue` enum with a warning
-- **Inline struct generation** — anonymous inline objects (in properties, array items, or `anyOf` variants) are extracted into dedicated structs, deduplicated by shape (matching property names, types, and nullability)
+- **`anyOf` / `oneOf` support** — `anyOf [Type, null]` maps to `Type?` (optional). Unions of JSON primitives (e.g. `string | integer`) become an enum with one case per type (`.int(Int)`, `.string(String)`); unions of objects that share a `const` discriminator become a tagged enum with one case per variant plus `unknown(String)`. Variants that differ only by `enum`, `const` or `pattern` collapse to their shared type. Anything else maps to `JSONValue` with a warning
+- **Open enums** — with `openEnums=true`, every enum gets an `unknown(RawValue)` case, so a value the server adds later decodes instead of failing the message. Unknown values encode back unchanged and are reported to an optional handler on the serializer (see [Open enums](#open-enums))
+- **Positional tuples** — arrays with mixed-type `prefixItems` (e.g. `[integer, integer, string, enum]`) become a struct encoded as an array, with elements named from each item's `title` (or an identifier-like `description`, else `item_N`)
+- **Inline struct generation** — anonymous inline objects are extracted into dedicated structs at any depth (properties, array items, arrays of arrays, `anyOf`/`oneOf` variants, objects inside arrays), deduplicated by shape (matching property names, types, and nullability). `allOf` compositions of several objects are merged into one struct
 - **`JSONValue` fallback type** — a `Codable & Sendable & Hashable` enum handling arbitrary JSON values (string, int, double, bool, object, array, null), generated only when needed
 - **Name collision detection** — if multiple messages share the same `name` field with different payloads, generation fails with a clear error. Pass `allowNameCollisions=true` to disambiguate using component keys instead
+- **Enums with a `null` member** — `enum: [a, b, null]` makes the property optional rather than adding a `null` case
 - **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums. Enum values containing dots (e.g. `sensor.alarm.high_temperature`) are treated as word separators and converted to valid camelCase Swift identifiers with explicit raw value assignments
 - **Undecodable message handling** — messages that fail to decode are surfaced as `.undecodable(Data, any Error)` cases on `IncomingMessage` by default, giving consumers access to the raw data and error for logging or debugging. Pass `undecodableMessages=drop` to silently skip malformed messages instead
 - **Non-object message payloads** — plain string/const messages (e.g. `PING`/`PONG`) are handled as `String` cases without requiring a struct
@@ -29,8 +32,8 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 | File | Contents |
 |------|----------|
 | `Package.swift` | SPM manifest — iOS 16+, macOS 13+, tvOS 16+, watchOS 9+ |
-| `Sources/Models.swift` | `Codable & Sendable` structs for every message payload, component schema, and inline anonymous object. Includes `JSONValue` enum when `anyOf` multi-type or untyped objects are present. When `msgpackFormat=array`, receive-direction structs include custom `init(from:)` using `UnkeyedDecodingContainer` for positional array decoding |
-| `Sources/Enums.swift` | Shared enum types extracted from schemas — `String`-backed (e.g. `Side`) and `Int`-backed (e.g. `Level`) |
+| `Sources/Models.swift` | `Codable & Sendable` structs for every message payload, component schema, and inline anonymous object. Also holds generated union enums and tuple structs. Includes `JSONValue` enum when an unsupported union or untyped objects are present. When `msgpackFormat=array`, receive-direction structs include custom `init(from:)` using `UnkeyedDecodingContainer` for positional array decoding |
+| `Sources/Enums.swift` | Shared enum types extracted from schemas — `String`-backed (e.g. `Side`) and `Int`-backed (e.g. `Level`). With `openEnums=true`, each has an `unknown` case, and `UnknownEnumValue` reports them |
 | `Sources/MessageEnums.swift` | `IncomingMessage` / `OutgoingMessage` tagged enums with discriminated decoding |
 | `Sources/MessageSerializer.swift` | `MessageSerializer` protocol + JSON and (optionally) MessagePack implementations |
 | `Sources/WebSocketClient.swift` | Actor-based client using `URLSessionWebSocketTask`; `AsyncStream`s for `messages`, `connectionState`, and `errors`; optional auto-reconnect via an injectable `ReconnectionPolicy` with an `onConnected` hook |
@@ -80,6 +83,7 @@ cd ./MyClient && swift build
 | `typePrefix` | no | `""` | Prefix prepended to all generated Swift type names (e.g. `OMN` → `OMNPlaceOrder`, `OMNWebSocketClient`) |
 | `allowNameCollisions` | no | `"false"` | When `"true"`, allow multiple messages to share the same `name` field. Colliding messages are disambiguated using their component key (e.g. `order_preview_response`). Default is `"false"`, which treats collisions as a generation error. |
 | `perspective` | no | `"server"` | Perspective from which the AsyncAPI spec is written: `server` (default, standard AsyncAPI v3 — `action: send` means server-to-client) or `client` (`action: send` means client-to-server). |
+| `openEnums` | no | `"false"` | When `"true"`, every generated enum gets an `unknown(RawValue)` case and unknown values are reported to the serializer's `unknownEnumValueHandler`. See [Open enums](#open-enums). |
 | `undecodableMessages` | no | `"yield"` | How to handle messages that fail to decode: `yield` (default — adds `.undecodable(Data, any Error)` case to `IncomingMessage`) or `drop` (silently skip malformed messages). |
 | `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
 
@@ -137,6 +141,38 @@ try await client.send(.auth(Auth(token: "my-token")))
 // Disconnect
 await client.disconnect()
 ```
+
+## Open enums
+
+A shipped app can't be updated as fast as a server adds enum values. With `-p openEnums=true`,
+each generated enum keeps the spec's cases and adds a fallback:
+
+```swift
+public enum Side: RawRepresentable, CaseIterable, Codable, Sendable, Hashable {
+    case buy
+    case sell
+    /// A value this version of the client doesn't know.
+    case unknown(String)   // `unknown(Int)` for integer enums
+}
+```
+
+- Decoding never throws on an unlisted value; it becomes `.unknown("short")`.
+- Encoding writes the raw value back unchanged, so an unknown value round-trips.
+- `allCases` lists only the spec's cases (for pickers).
+- Unknown values are reported through the decoder's `userInfo`. Pass a handler to the
+  serializer to send them to monitoring, so the client stays a contract canary without
+  failing users:
+
+```swift
+let serializer = JSONMessageSerializer(unknownEnumValueHandler: { value in
+    // value.type ("Side"), value.value ("short"), value.codingPath (["orders", "0", "side"])
+    Monitoring.report(value.description)
+})
+let client = WebSocketClient(configuration: ClientConfiguration(serializer: serializer))
+```
+
+Switches over an open enum must handle `.unknown` (render a neutral fallback). If a spec value
+is literally `unknown`, the fallback case is named `unknownValue` instead, with a warning.
 
 ## Reconnection behavior
 
@@ -202,13 +238,15 @@ asyncapi-swift-ws-template/
 - **Reserved type collision avoidance** — types that shadow Swift stdlib/Foundation types (e.g. `Error`, `Result`, `Array`) are prefixed with `Server` (e.g. `ServerError`). This applies before the user's `typePrefix`.
 - **`$ref` resolution** — the AsyncAPI parser v3 inlines `$ref` targets. The template reads `_schemaId` from resolved schemas to recover the original type name, filtering out parser-generated anonymous identifiers (`<anonymous-schema-N>` format).
 - **Inline struct deduplication** — anonymous inline objects are extracted into standalone structs keyed by their *shape* (sorted property names, types, formats, and nullability). If two different messages define inline objects with identical shapes, they share a single struct. Name collisions between inline structs from different parents are resolved by prefixing with the parent context name.
-- **`anyOf` handling** — `anyOf [Type, null]` (the nullable pattern) maps to `Type?`. Multi-type `anyOf` without a clear resolution maps to `JSONValue` with a generation warning. The `JSONValue` enum is only emitted when actually referenced.
+- **`anyOf` / `oneOf` handling** — `anyOf [Type, null]` (the nullable pattern) maps to `Type?`. Primitive and discriminated unions are registered while property types are resolved and rendered after the structs; a union declared as a named component schema takes that name. Other multi-type unions map to `JSONValue` with a generation warning. The `JSONValue` enum is only emitted when actually referenced.
+- **Stable names across versions** — deeper enum and inline-struct extraction runs as a second pass after the original one, so types the earlier passes named keep their names.
+- **Message vs component-schema names** — a message struct is named after the message; when that name would equal a component schema's (message `fill` vs schema `Fill`), the message struct takes its payload schema's name instead (`FillMessage`) with a warning.
 - **Name collision detection** — `extractMessages()` detects when different component messages share the same `name` field. By default this is a hard error. When `allowNameCollisions=true`, the second message is disambiguated using its component key (e.g. `submit_order_response` instead of `submit_order`).
 - **Decoder container ordering** — when both object and plain-string messages exist, the generated `init(from:)` tries the keyed container (`container(keyedBy:)`) first inside a `do` block, falling back to `singleValueContainer()` in the `catch` block. This ordering is critical: Swift's `Decoder` only allows one top-level container, and `singleValueContainer()` never throws — it always succeeds and registers itself, which would cause `container(keyedBy:)` to crash with *"Found existing top-level decoding container"*. The same pattern applies to msgpack array-format decoding (`unkeyedContainer()` first, `singleValueContainer()` in `catch`).
 
 ## Requirements
 
-- **Node.js** 18+
+- **Node.js** 18–24. `@asyncapi/generator` 3.2.1 (bundled with the CLI 6.x) detects template hooks with `fs.promises.stat(path, F_OK)`, which throws on Node 26, so on Node 26 the hooks silently don't run: `Sources/` isn't created (generation fails with `ENOENT`) and the formatter is skipped. Use Node 24 until the generator is fixed.
 - **@asyncapi/cli** 6.x (`npm install -g @asyncapi/cli`)
 - **Swift** 6.0+ (generated code)
 - **Xcode** 16+ / macOS 13+
@@ -252,9 +290,10 @@ Test fixtures live in `test/fixtures/` and cover:
 | `allof-outgoing.asyncapi.yaml` | `allOf` composition for outgoing messages — flattens `$ref` + inline properties into typed structs, enum extraction from composed schemas, const auto-assignment, `typePrefix` support |
 | `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
 | `dotted-enums.asyncapi.yaml` | Enum values containing dots (namespaced codes like `sensor.alarm.high_temperature`), dot-to-camelCase conversion, explicit raw value assignments |
+| `unions-and-nesting.asyncapi.yaml` | Primitive and discriminated `oneOf` unions, positional tuples (`prefixItems`), enums with a `null` member, enums in arrays and tuples, inline objects nested in arrays, `allOf`-merged array items, single-member `allOf`, a message whose name collides with a component schema, `openEnums=true` (with a Swift runtime test) |
 | `malicious-url-backslash.asyncapi.yaml` / `malicious-url-quote.asyncapi.yaml` | URL-injection hardening — server `host`/`pathname` values containing backslashes or quotes are escaped/handled safely when building the default connection URL |
 
-Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), `undecodableMessages` (yield/drop), and all combinations thereof.
+Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), `undecodableMessages` (yield/drop), `openEnums` (true/false), and all combinations thereof.
 
 ### Manual generation
 
@@ -269,7 +308,9 @@ cd output/basic && swift build
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
 - **Single discriminator key** — the discriminator key is auto-detected from the first `const` property found in receive message payloads. All incoming object messages must share the same discriminator key. Non-object payloads (plain strings) are matched by their `const` value.
-- **Deep nesting** — inline struct extraction handles one level of anonymous objects (direct properties, array items, `anyOf` variants). Deeply nested anonymous objects beyond the first level may still fall back to `JSONValue`. (Note: `prefixItems` tuple arrays where all elements share the same type are correctly mapped to their common Swift type, e.g. `[String]`.)
+- **Unions** — object unions need a shared `const` discriminator property; unions mixing objects and primitives, or objects without a discriminator, fall back to `JSONValue`. Object unions aren't generated for `msgpackFormat=array` (they need keyed containers).
+- **Tuples** — tuple elements must be primitives (or enums of them); a tuple with an object element falls back to `[JSONValue]`.
+- **Inline struct shape keys** — inline objects are deduplicated by their top-level property names and types, so two inline objects with the same keys but different nested contents share one struct.
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
 - **Apple platforms only** — generated code uses `URLSessionWebSocketTask` and Foundation, limiting it to Apple platforms. Linux/Windows support would require a different WebSocket library.
 - **Shallow `allOf` flattening** — `allOf` composition merges properties from all sub-schemas into a single struct, but deeply nested `allOf` (e.g. `allOf` inside an `allOf` variant) is not recursively resolved.
@@ -287,6 +328,10 @@ cd output/basic && swift build
 - [x] **`allOf` schema merging** — `allOf` schemas are flattened into a single struct with merged properties and required fields
 - [x] **Integer enum raw types** — detect numeric enums and generate `Int`-backed Swift enums
 - [x] **Non-object message payloads** — plain string/const messages handled as `String` enum cases
+- [x] **Open enums** — `openEnums=true` adds `unknown(RawValue)` to every enum, with an unknown-value report hook
+- [x] **Unions** — primitive unions and discriminated object unions become enums instead of `JSONValue`
+- [x] **Tuples** — mixed-type `prefixItems` become array-encoded structs
+- [x] **Deep inline extraction** — anonymous objects and enums are found at any depth
 - [ ] **Other enum raw types** — detect `Double` or other numeric enums beyond `Int`
 - [ ] **WebSocket channel bindings** — read query parameters and channel-level headers from AsyncAPI bindings
 - [ ] **Security scheme generation** — generate auth helpers from AsyncAPI security schemes (API key, bearer, OAuth2)

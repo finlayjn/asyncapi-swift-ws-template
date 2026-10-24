@@ -1,6 +1,6 @@
 {
   "name": "@finlayjn/asyncapi-swift-ws-template",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
   "main": "template/index.js",
   "license": "Apache-2.0",
@@ -26,8 +26,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
-    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js",
+    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
+    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js",
     "test:compile": "node --test test/compile.test.js",
     "test:swift": "node --test test/swift-runtime.test.js",
     "test:quick": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js"
@@ -78,6 +78,10 @@
       "perspective": {
         "description": "Perspective from which the AsyncAPI spec is written: 'server' (default, standard AsyncAPI v3 — send means server-to-client) or 'client' (send means client-to-server).",
         "default": "server"
+      },
+      "openEnums": {
+        "description": "When 'true', every generated enum gets an `unknown(RawValue)` case, so values the spec doesn't list decode instead of failing the message. Unknown values are reported to an optional handler passed to the serializer, and encode back unchanged.",
+        "default": "false"
       },
       "undecodableMessages": {
         "description": "How to handle messages that fail to decode: 'yield' (default — adds an undecodable case to IncomingMessage so consumers can inspect the raw data and error) or 'drop' (silently skip malformed messages).",
