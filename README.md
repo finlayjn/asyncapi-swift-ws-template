@@ -71,6 +71,21 @@ asyncapi generate fromTemplate ./my-api.asyncapi.yaml @finlayjn/asyncapi-swift-w
 cd ./MyClient && swift build
 ```
 
+### As a library (no generator, any Node version)
+
+`lib/` renders the same files without the AsyncAPI generator or its CLI, so it works on Node 26 and takes no npm installs or hooks. Parse the spec with `@asyncapi/parser`. If the spec `$ref`s other files, bundle it first with `@asyncapi/bundler`, as the CLI's `asyncapi bundle` does. Then pass the document and the same parameters:
+
+```js
+const { Parser, fromFile } = require('@asyncapi/parser');
+const { generate } = require('@finlayjn/asyncapi-swift-ws-template/lib');
+
+const { document } = await fromFile(new Parser(), 'asyncapi.yaml').parse();
+const files = generate(document, { server: 'production', typePrefix: 'My', openEnums: 'true' });
+// [{ path: 'Package.swift', content: '…' }, { path: 'Sources/Models.swift', content: '…' }, …]
+```
+
+The output is byte-for-byte what the generator writes (`test/library.test.js`). The `formatter` hook doesn't run.
+
 ## Parameters
 
 | Parameter | Required | Default | Description |
@@ -246,7 +261,7 @@ asyncapi-swift-ws-template/
 
 ## Requirements
 
-- **Node.js** 18–24. `@asyncapi/generator` 3.2.1 (bundled with the CLI 6.x) detects template hooks with `fs.promises.stat(path, F_OK)`, which throws on Node 26, so on Node 26 the hooks silently don't run: `Sources/` isn't created (generation fails with `ENOENT`) and the formatter is skipped. Use Node 24 until the generator is fixed.
+- **Node.js** 18–24 through the CLI (any version as a library, see above). `@asyncapi/generator` 3.2.1 (bundled with the CLI 6.x) detects template hooks with `fs.promises.stat(path, F_OK)`, which throws on Node 26, so on Node 26 the hooks silently don't run: `Sources/` isn't created (generation fails with `ENOENT`) and the formatter is skipped. Use Node 24 until the generator is fixed; 3.5.0 doesn't load on Node 26 either (it looks for a global npm at load time).
 - **@asyncapi/cli** 6.x (`npm install -g @asyncapi/cli`)
 - **Swift** 6.0+ (generated code)
 - **Xcode** 16+ / macOS 13+
