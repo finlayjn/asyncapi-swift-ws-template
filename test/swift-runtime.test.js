@@ -102,3 +102,22 @@ describe('Swift runtime tests — unions, nesting and open enums', () => {
     assert.ok(result.output.includes(' 0 failed'), `Some Swift tests failed:\n${result.output}`);
   });
 });
+
+describe('Swift runtime tests — the connection lifecycle', () => {
+  let out;
+  const testFile = path.join(__dirname, 'swift-tests', 'SocketTests.swift');
+
+  before(() => {
+    out = generate('basic.asyncapi.yaml', { server: 'local', packageName: 'RuntimeTestSocket' });
+    injectTestMain(out, testFile);
+  });
+
+  it('connects, reconnects with backoff and replaces sockets against a real server', () => {
+    const result = swiftRun(out);
+    if (!result.success) {
+      console.log(result.output);
+    }
+    assert.ok(result.success, `Swift socket tests failed:\n${result.output}`);
+    assert.ok(result.output.includes(' 0 failed'), `Some Swift socket tests failed:\n${result.output}`);
+  });
+});

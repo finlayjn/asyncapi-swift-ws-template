@@ -1,6 +1,6 @@
 {
   "name": "@finlayjn/asyncapi-swift-ws-template",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "AsyncAPI Generator template for Swift 6 WebSocket clients",
   "main": "template/index.js",
   "license": "Apache-2.0",
@@ -27,8 +27,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
-    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js",
+    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js test/edge-cases.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
+    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js test/edge-cases.test.js",
     "test:compile": "node --test test/compile.test.js",
     "test:swift": "node --test test/swift-runtime.test.js",
     "test:quick": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js"
@@ -42,7 +42,10 @@
   "generator": {
     "apiVersion": "v3",
     "renderer": "react",
-    "supportedProtocols": ["ws", "wss"],
+    "supportedProtocols": [
+      "ws",
+      "wss"
+    ],
     "parameters": {
       "server": {
         "description": "Name of the server from the AsyncAPI spec to use for connection URL.",

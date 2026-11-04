@@ -1,0 +1,64 @@
+asyncapi: 3.0.0
+info:
+  title: Partial Discriminator
+  version: 1.0.0
+  description: Two messages share a type and differ only on a property the others don't have, so no property tells every message apart.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  main:
+    address: /
+    messages:
+      orderNew:
+        $ref: "#/components/messages/OrderNew"
+      orderCancel:
+        $ref: "#/components/messages/OrderCancel"
+      trade:
+        $ref: "#/components/messages/Trade"
+      heartbeat:
+        $ref: "#/components/messages/Heartbeat"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/orderNew"
+      - $ref: "#/channels/main/messages/orderCancel"
+      - $ref: "#/channels/main/messages/trade"
+      - $ref: "#/channels/main/messages/heartbeat"
+
+components:
+  messages:
+    OrderNew:
+      name: order_new
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: order }
+          event: { type: string, const: new }
+    OrderCancel:
+      name: order_cancel
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: order }
+          event: { type: string, const: cancel }
+    Trade:
+      name: trade
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: trade }
+          px: { type: number }
+    Heartbeat:
+      name: heartbeat
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: heartbeat }

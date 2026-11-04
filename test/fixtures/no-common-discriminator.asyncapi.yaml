@@ -1,0 +1,43 @@
+asyncapi: 3.0.0
+info:
+  title: No Common Discriminator
+  version: 1.0.0
+  description: Each message has a constant, but on a different property.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  main:
+    address: /
+    messages:
+      status:
+        $ref: "#/components/messages/Status"
+      tick:
+        $ref: "#/components/messages/Tick"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/status"
+      - $ref: "#/channels/main/messages/tick"
+
+components:
+  messages:
+    Status:
+      name: status
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: status }
+    Tick:
+      name: tick
+      payload:
+        type: object
+        properties:
+          kind: { type: string, const: tick }

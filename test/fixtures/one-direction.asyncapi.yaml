@@ -1,0 +1,45 @@
+asyncapi: 3.0.0
+info:
+  title: One Direction
+  version: 1.0.0
+  description: Messages in one direction only, with constants that need escaping in Swift. From the server's perspective (the default) a client only receives; from the client's it only sends.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  feed:
+    address: /feed
+    messages:
+      quoted:
+        $ref: "#/components/messages/Quoted"
+      slashed:
+        $ref: "#/components/messages/Slashed"
+
+operations:
+  publish:
+    action: send
+    channel:
+      $ref: "#/channels/feed"
+    messages:
+      - $ref: "#/channels/feed/messages/quoted"
+      - $ref: "#/channels/feed/messages/slashed"
+
+components:
+  messages:
+    Quoted:
+      name: quoted
+      payload:
+        type: object
+        properties:
+          event-type: { type: string, const: 'say "hi"' }
+          text: { type: string }
+    Slashed:
+      name: slashed
+      payload:
+        type: object
+        properties:
+          event-type: { type: string, const: 'back\slash' }
+          count: { type: integer }

@@ -2,6 +2,7 @@
 // Returns all generated files as React <File> components
 
 const { setTypePrefix, setAllowNameCollisions } = require('../helpers/swift');
+const { normalizeParams } = require('../lib/params');
 const PackageSwift = require('./PackageSwift');
 const Gitignore = require('./Gitignore');
 const Models = require('./Models');
@@ -10,7 +11,8 @@ const MessageEnums = require('./MessageEnums');
 const Serializer = require('./Serializer');
 const WebSocketClient = require('./WebSocketClient');
 
-function Index({ asyncapi, params, originalAsyncAPI }) {
+function Index({ asyncapi, params: rawParams, originalAsyncAPI }) {
+  const params = normalizeParams(rawParams);
   // Configure type prefix before any rendering
   const prefix = params.typePrefix || '';
   setTypePrefix(prefix);

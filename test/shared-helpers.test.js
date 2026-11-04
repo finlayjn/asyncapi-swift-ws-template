@@ -57,11 +57,11 @@ describe('shared helpers: a spec module', () => {
   it('keeps its old names as aliases of the shared types', () => {
     const client = json['Sources/WebSocketClient.swift'];
     assert.match(client, /import Helpers\n/);
-    assert.match(client, /public typealias CPWebSocketClient = WebSocketClient<CPIncomingMessage, CPOutgoingMessage>/);
-    assert.match(client, /public typealias CPClientConfiguration = WebSocketClientConfiguration<CPIncomingMessage, CPOutgoingMessage>/);
-    assert.match(client, /public typealias CPExponentialBackoffPolicy = ExponentialBackoffPolicy/);
+    assert.match(client, /public typealias CPWebSocketClient = Helpers\.WebSocketClient<CPIncomingMessage, CPOutgoingMessage>/);
+    assert.match(client, /public typealias CPClientConfiguration = Helpers\.WebSocketClientConfiguration<CPIncomingMessage, CPOutgoingMessage>/);
+    assert.match(client, /public typealias CPExponentialBackoffPolicy = Helpers\.ExponentialBackoffPolicy/);
     assert.doesNotMatch(client, /public actor/);
-    assert.match(json['Sources/MessageSerializer.swift'], /public typealias CPUnknownEnumValue = UnknownEnumValue/);
+    assert.match(json['Sources/MessageSerializer.swift'], /public typealias CPUnknownEnumValue = Helpers\.UnknownEnumValue/);
   });
 
   it('gives its configuration the spec\'s serializer', () => {

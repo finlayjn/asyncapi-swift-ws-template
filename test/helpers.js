@@ -40,6 +40,10 @@ function generate(fixtureName, params = {}) {
     .map(([k, v]) => `-p ${k}=${v}`)
     .join(' ');
 
+  // On Node 26 the generator skips the template's hooks, including the one that makes Sources/
+  // (README, Requirements), so make it here.
+  fs.mkdirSync(path.join(outputDir, 'Sources'), { recursive: true });
+
   const cmd = `asyncapi generate fromTemplate "${specPath}" "${TEMPLATE_DIR}" -o "${outputDir}" ${paramArgs} --force-write`;
 
   try {
@@ -131,6 +135,8 @@ function generateResult(fixtureName, params = {}) {
   const paramArgs = Object.entries(params)
     .map(([k, v]) => `-p ${k}=${v}`)
     .join(' ');
+
+  fs.mkdirSync(path.join(outputDir, 'Sources'), { recursive: true }); // as in generate()
 
   const cmd = `asyncapi generate fromTemplate "${specPath}" "${TEMPLATE_DIR}" -o "${outputDir}" ${paramArgs} --force-write`;
 

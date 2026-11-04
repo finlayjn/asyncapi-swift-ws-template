@@ -519,26 +519,32 @@ function payloadConsts(payload) {
 /**
  * The key that tells incoming object messages apart, and each message's value for it.
  *
- * Of the keys any message gives a constant, the one that covers the most messages with distinct
- * values wins (ties: the key seen first). A message without that key matches on its name. Two
- * messages that would match the same value fail generation: the second could never decode.
+ * It's the first key that every message with a constant gives a constant, with a different value
+ * in each. A message with no constant at all matches on its name. When no key qualifies, generation
+ * fails: whichever key were chosen, some message could never decode.
  */
 function chooseDiscriminator(messages, enumName) {
+  const constant = (msg, key) => (msg.consts || []).find(([k]) => k === key)?.[1];
+  const withConsts = messages.filter(m => (m.consts || []).length > 0);
   const keys = [];
-  for (const msg of messages) {
-    for (const [key] of msg.consts || []) if (!keys.includes(key)) keys.push(key);
+  for (const msg of withConsts) {
+    for (const [key] of msg.consts) if (!keys.includes(key)) keys.push(key);
   }
-  let best = null;
-  for (const key of keys) {
-    const values = messages.map(m => (m.consts || []).find(([k]) => k === key)?.[1]).filter(v => v !== undefined);
-    if (new Set(values).size !== values.length) continue;
-    if (!best || values.length > best.covered) best = { key, covered: values.length };
+  const onEvery = keys.filter(key => withConsts.every(m => constant(m, key) !== undefined));
+  const key = onEvery.find(k => new Set(withConsts.map(m => constant(m, k))).size === withConsts.length)
+    ?? onEvery[0]
+    ?? (withConsts.length > 0 ? null : 'type');
+  if (key === null) {
+    const names = withConsts.map(m => `"${m.messageName}"`).join(', ');
+    throw new Error(
+      `${enumName}: no property has a constant in every incoming message (${names}), so they can't all be ` +
+      `told apart. Give each incoming message a constant for the same property, with a different value in each.`
+    );
   }
-  const key = best ? best.key : 'type';
   const values = new Map();
   const owners = new Map();
   for (const msg of messages) {
-    const value = (msg.consts || []).find(([k]) => k === key)?.[1] ?? msg.messageName;
+    const value = constant(msg, key) ?? msg.messageName;
     if (owners.has(value)) {
       throw new Error(
         `${enumName}: incoming messages "${owners.get(value)}" and "${msg.messageName}" would both decode on ` +

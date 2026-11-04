@@ -106,13 +106,22 @@ const client = generate(document, {
   * The serializer decides the socket frame: text, or binary for MessagePack.
   * Pass `generateHelpers({ unknownEnumValue: false })` when the module already has an `UnknownEnumValue` with the same API.
 * **`MessagePackSerializer`** lives in its own module, so JSON-only projects don't depend on msgpack-swift.
-* **Each client keeps its old names as type aliases** (`MyWebSocketClient`, `MyClientConfiguration`, `MyExponentialBackoffPolicy`, …), so code written against an inline client keeps compiling.
+* **Each client keeps its old names as type aliases** (`MyWebSocketClient`, `MyClientConfiguration`, `MyExponentialBackoffPolicy`, …), so code written against an inline client keeps compiling. The aliases name the helpers module (`Helpers.ExponentialBackoffPolicy`), so code imports the client module alone, as with an inline client; without a `typePrefix`, importing the helpers module as well would make the names ambiguous.
 * **Each client's configuration adds an initializer with the spec's serializer.** There is no default URL: pass the server's.
 * **Only `Sources/` is generated;** the host package declares the modules.
 
 ### Unknown values
 
 Open enums decode a value the client doesn't know as `unknown(raw)`. If the spec itself has a value named `unknown`, that case is `unknownValue`, so `.unknown` means the same thing in every enum.
+
+### Upgrading from 1.x
+
+2.0.0 changes generated code that call sites can depend on:
+
+* **`.unknown` is always the fallback case** of an open enum. In 1.x, a spec value named `unknown` kept the case `.unknown` and the fallback was `.unknownValue(raw)`; now the spec's value is `.unknownValue` and the fallback is `.unknown(raw)`. A `case .unknown:` still compiles but matches the other case, so check switches over enums whose spec has an `unknown` value.
+* **Specs whose incoming messages can't all be told apart fail generation** instead of generating a client that can never receive some of them: two messages with the same discriminator value, or no property every message gives a constant.
+* **`.connected` comes when the socket opens**, not when `connect()` is called, and `onConnected` fires then. Reconnect attempts count up until a socket opens.
+* **Parameters can be booleans** when the template is called as a library (`openEnums: true`).
 
 ## Parameters
 
@@ -128,6 +137,8 @@ Open enums decode a value the client doesn't know as `unknown(raw)`. If the spec
 | `perspective` | no | `"server"` | Perspective from which the AsyncAPI spec is written: `server` (default, standard AsyncAPI v3 — `action: send` means server-to-client) or `client` (`action: send` means client-to-server). |
 | `openEnums` | no | `"false"` | When `"true"`, every generated enum gets an `unknown(RawValue)` case and unknown values are reported to the serializer's `unknownEnumValueHandler`. See [Open enums](#open-enums). |
 | `undecodableMessages` | no | `"yield"` | How to handle messages that fail to decode: `yield` (default — adds `.undecodable(Data, any Error)` case to `IncomingMessage`) or `drop` (silently skip malformed messages). |
+| `helpersModule` | no | — | Module holding the shared helpers (see [Shared helpers across clients](#shared-helpers-across-clients)). The client imports it instead of carrying its own copy, and only `Sources/` is generated. |
+| `messagePackHelpersModule` | with `helpersModule` and `serialization=msgpack` | — | Module holding the shared `MessagePackSerializer`. |
 | `formatter` | no | `""` | Shell command to format generated Swift files (e.g. `swift-format -i`, `swiftformat`). File paths are appended as arguments. |
 
 ## Quick start (generated client)
@@ -214,8 +225,9 @@ let serializer = JSONMessageSerializer(unknownEnumValueHandler: { value in
 let client = WebSocketClient(configuration: ClientConfiguration(serializer: serializer))
 ```
 
-Switches over an open enum must handle `.unknown` (render a neutral fallback). If a spec value
-is literally `unknown`, the fallback case is named `unknownValue` instead, with a warning.
+Switches over an open enum must handle `.unknown(raw)` (render a neutral fallback). If a spec value
+is literally `unknown`, that value's case is named `unknownValue`, with a warning, so `.unknown`
+always means a value the client doesn't know.
 
 ## Reconnection behavior
 
@@ -238,15 +250,17 @@ let client = WebSocketClient(
 
 **How it works:**
 
-- The connection state transitions to `.connected` optimistically on `task.resume()` (URLSession exposes no cheap socket-open callback). A socket that fails to open surfaces immediately via the receive loop and triggers reconnection.
-- The `onConnected` hook fires on **every** (re)connection, before incoming messages are delivered. Put authentication and subscription there so subscriptions are restored automatically after a reconnect without the caller tracking connection state.
-- On unexpected disconnection, the client asks its `ReconnectionPolicy` for the delay before the next 1-based attempt; returning `nil` stops retrying. The default `ExponentialBackoffPolicy` uses `min(base * 2^(attempt-1), maxDelay) * random(jitter)` — jitter prevents thundering-herd reconnections.
-- The attempt counter resets to zero on each successful (re)connection, so `maxAttempts` is strictly enforced while the server is unreachable.
+- `connect()` moves to `.connecting`, and to `.connected` when the socket's opening handshake finishes (the session delegate's open callback). A socket that never opens never reports `.connected`.
+- The `onConnected` hook fires each time a socket opens: the first time and after every reconnect. Put authentication and subscription there so subscriptions are restored automatically after a reconnect without the caller tracking connection state. Messages can arrive while it runs.
+- On unexpected disconnection, the client asks its `ReconnectionPolicy` for the delay before the next 1-based attempt; returning `nil` stops retrying and the state becomes `.disconnected`. The state is `.reconnecting(attempt:)` while it waits and while that attempt's socket opens. The default `ExponentialBackoffPolicy` uses `min(base * 2^(attempt-1), maxDelay) * random(jitter)` — jitter prevents thundering-herd reconnections.
+- The attempt counter resets only when a socket opens, so while the server is unreachable the backoff grows and `maxAttempts` is enforced. Calling `connect()` yourself starts again from the first attempt.
+- Calling `connect()` on a client that already has a socket closes that socket first: one client never holds two.
+- A failed ping closes the socket, which ends the receive loop and reconnects (or, without reconnection, reports `.disconnected`).
 - Calling `disconnect()` sets an `intentionalDisconnect` flag that suppresses any in-flight or future reconnect attempts.
 - Connection state changes are observable via the `connectionState` AsyncStream: `.disconnected`, `.connecting`, `.connected`, `.reconnecting(attempt:)`.
 - Non-fatal errors — connection drops, ping failures (`WebSocketClientError.pingFailed`), and, when `undecodableMessages=drop`, decode failures — are surfaced on the `errors` AsyncStream rather than swallowed silently.
 
-To disable reconnection support entirely at generation time (removes the code from the output), pass `-p reconnect=false`.
+To disable reconnection support entirely at generation time (removes the code from the output), pass `-p reconnect=false`. With shared helpers the shared client always has reconnection, so `reconnect=false` makes the spec's configuration default to `NoReconnectionPolicy()` instead.
 
 
 ## Architecture
@@ -315,7 +329,8 @@ npm run test:static
 # Swift compilation tests (~60s) — verifies all configs compile under Swift 6
 npm run test:compile
 
-# Swift runtime tests (~10s) — builds and runs generated types at runtime
+# Swift runtime tests (~10s) — builds and runs generated types at runtime, and the client's
+# connection lifecycle against a local WebSocket server and an unreachable port
 npm run test:swift
 ```
 
@@ -334,6 +349,11 @@ Test fixtures live in `test/fixtures/` and cover:
 | `client-perspective.asyncapi.yaml` | `perspective=client` parameter — spec written from client perspective (non-standard), verifies direction mapping inversion |
 | `dotted-enums.asyncapi.yaml` | Enum values containing dots (namespaced codes like `sensor.alarm.high_temperature`), dot-to-camelCase conversion, explicit raw value assignments |
 | `unions-and-nesting.asyncapi.yaml` | Primitive and discriminated `oneOf` unions, positional tuples (`prefixItems`), enums with a `null` member, enums in arrays and tuples, inline objects nested in arrays, `allOf`-merged array items, single-member `allOf`, a message whose name collides with a component schema, `openEnums=true` (with a Swift runtime test) |
+| `allof-shared-const.asyncapi.yaml` | Messages composed with `allOf` that share a constant (a currency) and differ on another (`type`): decoding uses the one that tells them apart |
+| `duplicate-discriminator.asyncapi.yaml` / `partial-discriminator.asyncapi.yaml` / `no-common-discriminator.asyncapi.yaml` | Specs whose incoming messages can't all be told apart fail generation, with the messages named |
+| `one-direction.asyncapi.yaml` | A client that only receives (or, with `perspective=client`, only sends), and constants and keys that need escaping in Swift |
+| `unknown-value.asyncapi.yaml` | A spec enum value named `unknown`, which becomes `unknownValue` |
+| `server-variables*.asyncapi.yaml` | Server variables filled from their defaults, and refused without one or with an unsafe one |
 | `malicious-url-backslash.asyncapi.yaml` / `malicious-url-quote.asyncapi.yaml` | URL-injection hardening — server `host`/`pathname` values containing backslashes or quotes are escaped/handled safely when building the default connection URL |
 
 Parameter combinations tested: `serialization` (json/msgpack), `msgpackFormat` (map/array), `reconnect` (true/false), `typePrefix`, `packageName`, `allowNameCollisions`, `perspective` (server/client), `undecodableMessages` (yield/drop), `openEnums` (true/false), and all combinations thereof.
@@ -350,7 +370,7 @@ cd output/basic && swift build
 ## Known limitations
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
-- **Single discriminator key** — the discriminator key is auto-detected from the first `const` property found in receive message payloads. All incoming object messages must share the same discriminator key. Non-object payloads (plain strings) are matched by their `const` value.
+- **Single discriminator key** — incoming object messages are told apart by one property: the first that every message with a `const` gives a `const`, with a different value in each (so a constant they share, such as a channel, is skipped). A message with no `const` matches on its name. If no property qualifies, or two messages would match the same value, generation fails, since one of them could never be received. Non-object payloads (plain strings) are matched by their `const` value.
 - **Unions** — object unions need a shared `const` discriminator property; unions mixing objects and primitives, or objects without a discriminator, fall back to `JSONValue`. Object unions aren't generated for `msgpackFormat=array` (they need keyed containers).
 - **Tuples** — tuple elements must be primitives (or enums of them); a tuple with an object element falls back to `[JSONValue]`.
 - **Inline struct shape keys** — inline objects are deduplicated by their top-level property names and types, so two inline objects with the same keys but different nested contents share one struct.
