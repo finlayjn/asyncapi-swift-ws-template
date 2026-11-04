@@ -1,0 +1,95 @@
+asyncapi: 3.0.0
+info:
+  title: Composition And Shapes
+  version: 1.0.0
+  description: allOf nested in allOf and beside a schema's own properties, and inline objects with the same top-level keys but different contents.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  main:
+    address: /
+    messages:
+      order:
+        $ref: "#/components/messages/Order"
+      fill:
+        $ref: "#/components/messages/Fill"
+      cancel:
+        $ref: "#/components/messages/Cancel"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/main"
+    messages:
+      - $ref: "#/channels/main/messages/order"
+      - $ref: "#/channels/main/messages/fill"
+      - $ref: "#/channels/main/messages/cancel"
+
+components:
+  schemas:
+    Stamped:
+      type: object
+      required: [ts]
+      properties:
+        ts: { type: integer }
+    Base:
+      allOf:
+        - $ref: "#/components/schemas/Stamped"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string }
+  messages:
+    Order:
+      name: order
+      payload:
+        type: object
+        required: [type, qty]
+        properties:
+          type: { type: string, const: order }
+          qty: { type: string }
+          detail:
+            type: object
+            properties:
+              kind: { type: string, enum: [limit, market] }
+              venue:
+                type: object
+                properties:
+                  id: { type: string }
+        allOf:
+          - $ref: "#/components/schemas/Base"
+    Fill:
+      name: fill
+      payload:
+        type: object
+        required: [type]
+        properties:
+          type: { type: string, const: fill }
+          detail:
+            type: object
+            properties:
+              kind: { type: string, enum: [maker, taker] }
+              venue:
+                type: object
+                properties:
+                  id: { type: integer }
+    Cancel:
+      name: cancel
+      payload:
+        type: object
+        required: [type]
+        properties:
+          type: { type: string, const: cancel }
+          detail:
+            type: object
+            properties:
+              kind: { type: string, enum: [limit, market] }
+              venue:
+                type: object
+                properties:
+                  id: { type: string }

@@ -1,0 +1,47 @@
+asyncapi: 3.0.0
+info:
+  title: MessagePack Array Untagged
+  version: 1.0.0
+  description: A positional message whose first element isn't a constant, so it can't be told apart.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  market:
+    address: /
+    messages:
+      trade:
+        $ref: "#/components/messages/Trade"
+      quote:
+        $ref: "#/components/messages/Quote"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/market"
+    messages:
+      - $ref: "#/channels/market/messages/trade"
+      - $ref: "#/channels/market/messages/quote"
+
+components:
+  messages:
+    Trade:
+      name: trade
+      payload:
+        type: object
+        required: [type, price]
+        properties:
+          type: { type: string, const: trade }
+          price: { type: string }
+    Quote:
+      name: quote
+      payload:
+        type: object
+        required: [bid, type]
+        properties:
+          type: { type: string, const: quote }
+          bid: { type: string }

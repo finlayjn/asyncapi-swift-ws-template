@@ -80,6 +80,52 @@ describe('the incoming discriminator at the edges', () => {
   });
 });
 
+describe('composition and shapes', () => {
+  it('merges allOf members, nested ones too, with a schema\'s own properties', async () => {
+    const models = byPath(generate(await parse('composition-and-shapes.asyncapi.yaml'), { server: 'local' }))['Sources/Models.swift'];
+    const order = models.slice(models.indexOf('public struct Order:'), models.indexOf('public struct Fill:'));
+    for (const field of ['type', 'qty', 'detail', 'ts', 'id']) assert.match(order, new RegExp(`public let \`?${field}\`?:`));
+  });
+
+  it('shares an inline struct only between objects of the same whole shape', async () => {
+    const models = byPath(generate(await parse('composition-and-shapes.asyncapi.yaml'), { server: 'local' }))['Sources/Models.swift'];
+    assert.match(models, /public struct Order:[\s\S]*?public let detail: Detail\?/);
+    assert.match(models, /public struct Cancel:[\s\S]*?public let detail: Detail\?/);
+    assert.match(models, /public struct Fill:[\s\S]*?public let detail: FillDetail\?/);
+    assert.match(models, /public struct FillDetailVenue:[\s\S]*?public let id: Int\?/);
+    assert.match(models, /public struct Venue:[\s\S]*?public let id: String\?/);
+  });
+
+  it('backs an enum of non-integer numbers with Double', async () => {
+    const files = byPath(generate(await parse('msgpack-array-tags.asyncapi.yaml'), { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' }));
+    const enums = files['Sources/Enums.swift'];
+    assert.match(enums, /public enum Step: Double, Codable, Sendable \{\n    case _0_5 = 0\.5\n    case _1_5 = 1\.5\n    case _minus2 = -2\n\}/);
+    const open = byPath(generate(await parse('msgpack-array-tags.asyncapi.yaml'), { server: 'local', openEnums: 'true' }))['Sources/Enums.swift'];
+    assert.match(open, /case unknown\(Double\)/);
+    assert.match(open, /case 0\.5: self = \._0_5/);
+  });
+});
+
+describe('MessagePack arrays', () => {
+  it('tags each message by its first element and checks the constants after it', async () => {
+    const files = byPath(generate(await parse('msgpack-array-tags.asyncapi.yaml'), { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' }));
+    assert.match(files['Sources/MessageEnums.swift'], /case "trade":\n\s+self = \.trade\(try Trade\(from: &container\)\)/);
+    const models = files['Sources/Models.swift'];
+    const containerInit = models.slice(models.indexOf('init(from container: inout UnkeyedDecodingContainer)', models.indexOf('public struct Trade:')));
+    assert.match(containerInit, /self\.`type` = "trade"\n        let element1 = try container\.decode\(String\.self\)\n        guard element1 == "book"/);
+  });
+
+  it('fails generation when a message\'s first element isn\'t a constant', async () => {
+    const document = await parse('msgpack-array-untagged.asyncapi.yaml');
+    assert.throws(
+      () => generate(document, { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' }),
+      /the first element of "quote" \(bid\) isn't a constant/
+    );
+    // As keyed maps, the same spec decodes on `type`.
+    assert.doesNotThrow(() => generate(document, { server: 'local', serialization: 'msgpack' }));
+  });
+});
+
 describe('parameters', () => {
   it('accepts booleans from a library caller', async () => {
     const basic = byPath(generate(await parse('basic.asyncapi.yaml'), { server: 'local', reconnect: false }));

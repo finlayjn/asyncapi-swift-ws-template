@@ -121,3 +121,24 @@ describe('Swift runtime tests — the connection lifecycle', () => {
     assert.ok(result.output.includes(' 0 failed'), `Some Swift socket tests failed:\n${result.output}`);
   });
 });
+
+describe('Swift runtime tests — MessagePack arrays', () => {
+  let out;
+  const testFile = path.join(__dirname, 'swift-tests', 'ArrayTagsTests.swift');
+
+  before(() => {
+    out = generate('msgpack-array-tags.asyncapi.yaml', {
+      server: 'local', packageName: 'RuntimeTestArrayTags', serialization: 'msgpack', msgpackFormat: 'array',
+    });
+    injectTestMain(out, testFile);
+  });
+
+  it('decodes rows by their first element and checks the constants after it', () => {
+    const result = swiftRun(out);
+    if (!result.success) {
+      console.log(result.output);
+    }
+    assert.ok(result.success, `Swift array tag tests failed:\n${result.output}`);
+    assert.ok(result.output.includes(' 0 failed'), `Some Swift array tag tests failed:\n${result.output}`);
+  });
+});

@@ -1,0 +1,66 @@
+asyncapi: 3.0.0
+info:
+  title: MessagePack Array Tags
+  version: 1.0.0
+  description: Positional MessagePack messages whose first element is the tag, with a second constant after it and a number enum.
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  market:
+    address: /
+    messages:
+      trade:
+        $ref: "#/components/messages/Trade"
+      quote:
+        $ref: "#/components/messages/Quote"
+      subscribe:
+        $ref: "#/components/messages/Subscribe"
+
+operations:
+  sendToClient:
+    action: send
+    channel:
+      $ref: "#/channels/market"
+    messages:
+      - $ref: "#/channels/market/messages/trade"
+      - $ref: "#/channels/market/messages/quote"
+  receiveFromClient:
+    action: receive
+    channel:
+      $ref: "#/channels/market"
+    messages:
+      - $ref: "#/channels/market/messages/subscribe"
+
+components:
+  messages:
+    Trade:
+      name: trade
+      payload:
+        type: object
+        required: [type, channel, price, size]
+        properties:
+          channel: { type: string, const: book }
+          price: { type: string }
+          size: { type: string }
+          type: { type: string, const: trade }
+    Quote:
+      name: quote
+      payload:
+        type: object
+        required: [type, channel, bid, step]
+        properties:
+          type: { type: string, const: quote }
+          channel: { type: string, const: book }
+          bid: { type: string }
+          step: { type: number, enum: [0.5, 1.5, -2] }
+    Subscribe:
+      name: subscribe
+      payload:
+        type: object
+        properties:
+          type: { type: string, const: subscribe }
+          channel: { type: string }

@@ -1,7 +1,7 @@
 // helpers/schema.js — Extract messages, schemas, and enums from parsed AsyncAPI v3 document
 // Parser v3 API: collections have .all() returning arrays, schemas have method-based accessors
 
-const { toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection, swiftStringEscape, tupleElementLabel } = require('./swift');
+const { inlineShapeKey, toSwiftTypeName, toSwiftBaseTypeName, toSwiftPropertyName, jsonSchemaTypeToSwift, getTypePrefix, isAnonymousSchema, addWarning, getAllowNameCollisions, clientDirection, swiftStringEscape, tupleElementLabel } = require('./swift');
 
 /**
  * Apply the current type prefix to a base name.
@@ -74,33 +74,16 @@ function extractMessages(asyncapi) {
         let discriminatorKey = null;
         let hasObjectPayload = false;
 
-        if (payload && typeof payload.properties === 'function') {
-          const props = payload.properties();
-          if (props && typeof props === 'object' && Object.keys(props).length > 0) {
-            hasObjectPayload = true;
-            for (const [key, propSchema] of Object.entries(props)) {
-              const c = call(propSchema, 'const');
-              if (c !== undefined && c !== null) {
-                discriminatorKey = key;
-                constTypeValue = String(c);
-                break;
-              }
-            }
-          }
-        }
-
-        // Check for allOf composition — flatten and treat as object payload
-        if (!hasObjectPayload && payload) {
-          const flattened = flattenAllOf(payload);
-          if (flattened && Object.keys(flattened.properties).length > 0) {
-            hasObjectPayload = true;
-            for (const [key, propSchema] of Object.entries(flattened.properties)) {
-              const c = call(propSchema, 'const');
-              if (c !== undefined && c !== null) {
-                discriminatorKey = key;
-                constTypeValue = String(c);
-                break;
-              }
+        // An object payload: its own properties and its allOf members'
+        const shape = objectShape(payload);
+        if (shape) {
+          hasObjectPayload = true;
+          for (const [key, propSchema] of Object.entries(shape.properties)) {
+            const c = call(propSchema, 'const');
+            if (c !== undefined && c !== null) {
+              discriminatorKey = key;
+              constTypeValue = String(c);
+              break;
             }
           }
         }
@@ -133,35 +116,16 @@ function extractMessages(asyncapi) {
       let discriminatorKey = null;
       let hasObjectPayload = false;
 
-      if (payload && typeof payload.properties === 'function') {
-        const props = payload.properties();
-        if (props && typeof props === 'object' && Object.keys(props).length > 0) {
-          hasObjectPayload = true;
-          // Find the discriminator: first property with a const value
-          for (const [key, propSchema] of Object.entries(props)) {
-            const c = call(propSchema, 'const');
-            if (c !== undefined && c !== null) {
-              discriminatorKey = key;
-              constTypeValue = String(c);
-              break;
-            }
-          }
-        }
-      }
-
-      // Check for allOf composition — flatten and treat as object payload
-      if (!hasObjectPayload && payload) {
-        const flattened = flattenAllOf(payload);
-        if (flattened && Object.keys(flattened.properties).length > 0) {
-          hasObjectPayload = true;
-          // Find the discriminator in the flattened properties
-          for (const [key, propSchema] of Object.entries(flattened.properties)) {
-            const c = call(propSchema, 'const');
-            if (c !== undefined && c !== null) {
-              discriminatorKey = key;
-              constTypeValue = String(c);
-              break;
-            }
+      // An object payload: its own properties and its allOf members'
+      const shape = objectShape(payload);
+      if (shape) {
+        hasObjectPayload = true;
+        for (const [key, propSchema] of Object.entries(shape.properties)) {
+          const c = call(propSchema, 'const');
+          if (c !== undefined && c !== null) {
+            discriminatorKey = key;
+            constTypeValue = String(c);
+            break;
           }
         }
       }
@@ -388,6 +352,7 @@ function _registerEnum(enumValues, propName, contextName, enumMap) {
   const key = enumKey(enumValues);
   if (enumMap.has(key)) return;
   const allIntegers = enumValues.every(v => typeof v === 'number' && Number.isInteger(v));
+  const allNumbers = enumValues.every(v => typeof v === 'number');
   // Disambiguate: if a different enum already uses this property name, prefix with context
   // Use base names (no type prefix) for context building; prefix is applied via toSwiftTypeName at usage sites
   let baseName = toSwiftBaseTypeName(propName);
@@ -400,7 +365,7 @@ function _registerEnum(enumValues, propName, contextName, enumMap) {
     baseName,
     swiftName: _applyPrefix(baseName),
     values: enumValues,
-    rawType: allIntegers ? 'Int' : 'String',
+    rawType: allIntegers ? 'Int' : allNumbers ? 'Double' : 'String',
   });
 }
 
@@ -409,12 +374,7 @@ function _registerEnum(enumValues, propName, contextName, enumMap) {
  */
 function _propertiesOf(schema) {
   if (!schema) return null;
-  let props = typeof schema.properties === 'function' ? schema.properties() : null;
-  if (!props || Object.keys(props).length === 0) {
-    const flattened = flattenAllOf(schema);
-    props = flattened ? flattened.properties : null;
-  }
-  return props && Object.keys(props).length > 0 ? props : null;
+  return objectShape(schema)?.properties ?? null;
 }
 
 /**
@@ -503,10 +463,7 @@ function scanForEnums(schema, contextName, enumMap) {
  */
 function payloadConsts(payload) {
   if (!payload) return [];
-  let props = typeof payload.properties === 'function' ? payload.properties() : null;
-  if (!props || typeof props !== 'object' || Object.keys(props).length === 0) {
-    props = flattenAllOf(payload)?.properties ?? null;
-  }
+  const props = objectShape(payload)?.properties;
   if (!props) return [];
   const consts = [];
   for (const [key, propSchema] of Object.entries(props)) {
@@ -557,50 +514,77 @@ function chooseDiscriminator(messages, enumName) {
   return { key, values };
 }
 
-function flattenAllOf(schema) {
+/**
+ * A shape's property names in positional order (MessagePack arrays): its required list's order,
+ * then the rest as declared.
+ */
+function positionalOrder({ properties, requiredFields }) {
+  const position = (name) => {
+    const i = requiredFields.indexOf(name);
+    return i === -1 ? Infinity : i;
+  };
+  return Object.keys(properties).sort((a, b) => position(a) - position(b));
+}
+
+/**
+ * With MessagePack arrays, a message's first element is its tag. So each incoming object
+ * message's first property in positional order must be a constant, different in each message;
+ * otherwise generation fails, since a message without one could never be told apart.
+ */
+function chooseArrayTags(messages, enumName) {
+  const values = new Map();
+  const owners = new Map();
+  for (const msg of messages) {
+    const shape = objectShape(msg.payload);
+    const first = shape ? positionalOrder(shape)[0] : undefined;
+    const c = first !== undefined ? call(shape.properties[first], 'const') : undefined;
+    if (c === undefined || c === null) {
+      throw new Error(
+        `${enumName}: the first element of "${msg.messageName}" (${first ?? 'none'}) isn't a constant, so with ` +
+        `msgpackFormat=array it can't be told apart from other messages. Make its first required property a const.`
+      );
+    }
+    const value = String(c);
+    if (owners.has(value)) {
+      throw new Error(
+        `${enumName}: incoming messages "${owners.get(value)}" and "${msg.messageName}" both start with "${value}", ` +
+        `so "${msg.messageName}" could never be received. Give each message a distinct first constant.`
+      );
+    }
+    owners.set(value, msg.messageName);
+    values.set(msg.messageName, value);
+  }
+  return { values };
+}
+
+/**
+ * An object schema's properties and required list: its own, merged with each allOf member's,
+ * members' members included. The first schema to declare a property wins (its own before its
+ * members', members in order). Null when it has no properties.
+ */
+function objectShape(schema) {
   if (!schema) return null;
-
-  // Check for allOf on the schema model
-  let allOfVariants = null;
-  if (typeof schema.allOf === 'function') {
-    const variants = schema.allOf();
-    if (Array.isArray(variants) && variants.length > 0) {
-      allOfVariants = variants;
-    }
-  }
-
-  if (!allOfVariants) return null;
-
-  const mergedProps = {};
-  const mergedRequired = [];
-
-  for (const variant of allOfVariants) {
-    // Collect properties
-    if (typeof variant.properties === 'function') {
-      const props = variant.properties();
-      if (props && typeof props === 'object') {
-        for (const [key, value] of Object.entries(props)) {
-          if (!mergedProps[key]) {
-            mergedProps[key] = value;
-          }
-        }
+  const properties = {};
+  const requiredFields = [];
+  const seen = new Set();
+  const add = (node) => {
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    const own = typeof node.properties === 'function' ? node.properties() : null;
+    if (own && typeof own === 'object') {
+      for (const [key, value] of Object.entries(own)) {
+        if (!(key in properties)) properties[key] = value;
       }
     }
-
-    // Collect required fields
-    const req = typeof variant.required === 'function' ? variant.required() : null;
-    if (Array.isArray(req)) {
-      for (const r of req) {
-        if (!mergedRequired.includes(r)) {
-          mergedRequired.push(r);
-        }
-      }
+    const required = typeof node.required === 'function' ? node.required() : null;
+    if (Array.isArray(required)) {
+      for (const r of required) if (!requiredFields.includes(r)) requiredFields.push(r);
     }
-  }
-
-  if (Object.keys(mergedProps).length === 0) return null;
-
-  return { properties: mergedProps, requiredFields: mergedRequired };
+    const members = typeof node.allOf === 'function' ? node.allOf() : null;
+    if (Array.isArray(members)) for (const member of members) add(member);
+  };
+  add(schema);
+  return Object.keys(properties).length > 0 ? { properties, requiredFields } : null;
 }
 
 /**
@@ -613,24 +597,9 @@ function flattenAllOf(schema) {
  */
 function buildPropertyList(schema, parentSwiftName, enumDefs, inlineStructMap) {
   // Try direct properties first
-  let props = null;
-  let requiredFields = [];
-
-  if (schema && typeof schema.properties === 'function') {
-    props = schema.properties();
-    requiredFields = (typeof schema.required === 'function' ? schema.required() : null) || [];
-  }
-
-  // If no direct properties, try flattening allOf
-  if ((!props || Object.keys(props).length === 0) && schema) {
-    const flattened = flattenAllOf(schema);
-    if (flattened) {
-      props = flattened.properties;
-      requiredFields = flattened.requiredFields;
-    }
-  }
-
-  if (!props || Object.keys(props).length === 0) return [];
+  const shape = objectShape(schema);
+  if (!shape) return [];
+  const { properties: props, requiredFields } = shape;
 
   const result = [];
 
@@ -722,18 +691,7 @@ function collectReceiveSchemaNames(asyncapi) {
 }
 
 function _collectNestedSchemaNames(schema, names) {
-  let props = null;
-  if (schema && typeof schema.properties === 'function') {
-    props = schema.properties();
-  }
-
-  // If no direct properties, try flattening allOf
-  if ((!props || Object.keys(props).length === 0) && schema) {
-    const flattened = flattenAllOf(schema);
-    if (flattened) {
-      props = flattened.properties;
-    }
-  }
+  const props = objectShape(schema)?.properties ?? null;
 
   if (!props) return;
 
@@ -767,24 +725,7 @@ function _collectNestedSchemaNames(schema, names) {
 }
 
 /**
- * Compute a shape key for an inline object schema (sorted property names + types).
- * Used to deduplicate identical anonymous structs.
- */
-function _shapeKey(plainSchema) {
-  if (!plainSchema || !plainSchema.properties) return null;
-  const entries = Object.entries(plainSchema.properties)
-    .map(([name, prop]) => {
-      let t = prop.type || 'unknown';
-      if (prop.format) t += ':' + prop.format;
-      if (prop.nullable) t += '?';
-      return `${name}:${t}`;
-    })
-    .sort();
-  return entries.join('|');
-}
-
-/**
- * Extract inline anonymous object schemas from all messages, deduplicated by shape.
+ * Extract inline anonymous object schemas from all messages, deduplicated by their whole shape.
  * Returns a Map<shapeKey, { swiftName, plainSchema, schema }> for structs that
  * need to be generated.
  *
@@ -797,18 +738,7 @@ function extractInlineStructs(asyncapi) {
   const schemas = extractSchemas(asyncapi);
 
   function scanSchema(schema, parentBaseName) {
-    let props = null;
-    if (schema && typeof schema.properties === 'function') {
-      props = schema.properties();
-    }
-
-    // If no direct properties, try flattening allOf
-    if ((!props || Object.keys(props).length === 0) && schema) {
-      const flattened = flattenAllOf(schema);
-      if (flattened) {
-        props = flattened.properties;
-      }
-    }
+    const props = objectShape(schema)?.properties ?? null;
 
     if (!props) return;
 
@@ -858,7 +788,7 @@ function extractInlineStructs(asyncapi) {
 
   function _registerInlineObject(schema, propName, parentBaseName, map) {
     const plain = schemaToPlain(schema);
-    const key = _shapeKey(plain);
+    const key = inlineShapeKey(plain);
     if (!key) return;
 
     if (!map.has(key)) {
@@ -910,6 +840,7 @@ function extractInlineStructs(asyncapi) {
 module.exports = {
   extractMessages,
   chooseDiscriminator,
+  chooseArrayTags,
   extractSchemas,
   extractEnums,
   schemaToPlain,

@@ -413,22 +413,47 @@ function _withoutRepeatedPrefix(name) {
   return _typePrefix + name.slice(_typePrefix.length).split(_typePrefix).join('');
 }
 
+// Schema keywords that don't change the generated struct.
+const DOC_KEYWORDS = new Set(['description', 'default', 'title', 'example', 'examples']);
+
+/** A plain schema with sorted keys, without documentation or the parser's anonymous ids. */
+function _canonicalSchema(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+  const out = {};
+  for (const key of Object.keys(node).sort()) {
+    const value = node[key];
+    if (DOC_KEYWORDS.has(key)) continue;
+    if (key === '_schemaId') {
+      if (!isAnonymousSchema(value)) out[key] = value;
+    } else if (key === 'properties') {
+      out[key] = Object.fromEntries(Object.keys(value).sort().map(name => [name, _canonicalSchema(value[name])]));
+    } else if (key === 'items') {
+      out[key] = _canonicalSchema(value);
+    } else if (key === 'anyOf' || key === 'oneOf' || key === 'allOf') {
+      out[key] = value.map(_canonicalSchema);
+    } else {
+      out[key] = value; // enum, const, required (its order is the positional order), …
+    }
+  }
+  return out;
+}
+
+/**
+ * The key inline objects share only when they'd generate the same struct: the whole schema,
+ * nested properties, enums, constants, required lists and item types included. Null for a
+ * schema without properties.
+ */
+function inlineShapeKey(plain) {
+  if (!plain || !plain.properties) return null;
+  return JSON.stringify(_canonicalSchema(plain));
+}
+
 /**
  * Resolve an inline anonymous object to its deduplicated Swift type name.
  */
 function _resolveInlineObject(plainProp, parentName, inlineStructMap) {
   if (inlineStructMap && plainProp.properties) {
-    // Build shape key to look up
-    const entries = Object.entries(plainProp.properties)
-      .map(([name, p]) => {
-        let t = p.type || 'unknown';
-        if (p.format) t += ':' + p.format;
-        if (p.nullable) t += '?';
-        return `${name}:${t}`;
-      })
-      .sort();
-    const key = entries.join('|');
-    const found = inlineStructMap.get(key);
+    const found = inlineStructMap.get(inlineShapeKey(plainProp));
     if (found) return found.swiftName;
   }
   // Fallback: derive from parent name
@@ -516,6 +541,7 @@ function swiftStringEscape(s) {
 }
 
 module.exports = {
+  inlineShapeKey,
   toSwiftTypeName,
   toSwiftBaseTypeName,
   toSwiftPropertyName,
