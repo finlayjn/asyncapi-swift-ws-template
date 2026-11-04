@@ -86,6 +86,34 @@ const files = generate(document, { server: 'production', typePrefix: 'My', openE
 
 The output is byte-for-byte what the generator writes (`test/library.test.js`). The `formatter` hook doesn't run.
 
+### Shared helpers across clients
+
+By default every client carries its own prefixed copy of the WebSocket client, reconnection policies, serializers and `UnknownEnumValue`. With several clients in one project, generate those once and share them:
+
+```js
+const { generate, generateHelpers, generateMessagePackHelpers } = require('@finlayjn/asyncapi-swift-ws-template/lib');
+
+const helpers = generateHelpers();                              // a module, say `Helpers`
+const messagePack = generateMessagePackHelpers('Helpers');      // a module with MessagePackSerializer
+const client = generate(document, {
+  server: 'production', typePrefix: 'My', openEnums: 'true',
+  helpersModule: 'Helpers',
+  messagePackHelpersModule: 'HelpersMessagePack',               // only with MessagePack
+});
+```
+
+* **What the helpers module holds:** a `WebSocketClient` actor that is generic over a spec's incoming and outgoing messages, with its `WebSocketClientConfiguration`, reconnection policies, `WebSocketClientError`, `MessageSerializer` and `JSONMessageSerializer`, and `UnknownEnumValue`.
+  * The serializer decides the socket frame: text, or binary for MessagePack.
+  * Pass `generateHelpers({ unknownEnumValue: false })` when the module already has an `UnknownEnumValue` with the same API.
+* **`MessagePackSerializer`** lives in its own module, so JSON-only projects don't depend on msgpack-swift.
+* **Each client keeps its old names as type aliases** (`MyWebSocketClient`, `MyClientConfiguration`, `MyExponentialBackoffPolicy`, …), so code written against an inline client keeps compiling.
+* **Each client's configuration adds an initializer with the spec's serializer.** There is no default URL: pass the server's.
+* **Only `Sources/` is generated;** the host package declares the modules.
+
+### Unknown values
+
+Open enums decode a value the client doesn't know as `unknown(raw)`. If the spec itself has a value named `unknown`, that case is `unknownValue`, so `.unknown` means the same thing in every enum.
+
 ## Parameters
 
 | Parameter | Required | Default | Description |

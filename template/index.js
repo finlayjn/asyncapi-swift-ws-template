@@ -18,7 +18,7 @@ function Index({ asyncapi, params, originalAsyncAPI }) {
 
   return [
     <PackageSwift key="package" asyncapi={asyncapi} params={params} />,
-    <Gitignore key="gitignore" />,
+    <Gitignore key="gitignore" params={params} />,
     <Models key="models" asyncapi={asyncapi} params={params} />,
     <Enums key="enums" asyncapi={asyncapi} params={params} />,
     <MessageEnums key="messageEnums" asyncapi={asyncapi} params={params} />,

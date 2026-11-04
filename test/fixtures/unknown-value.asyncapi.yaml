@@ -1,0 +1,27 @@
+asyncapi: 3.0.0
+info:
+  title: Unknown value
+  version: 1.0.0
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+channels:
+  root:
+    address: /
+    messages:
+      status:
+        payload:
+          type: object
+          properties:
+            type:
+              type: string
+              const: status
+            state:
+              type: string
+              enum: [active, unknown, closed]
+operations:
+  receiveStatus:
+    action: send
+    channel:
+      $ref: '#/channels/root'

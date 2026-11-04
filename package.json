@@ -27,8 +27,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
-    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js",
+    "test": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js && node --test test/compile.test.js test/swift-runtime.test.js",
+    "test:static": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js test/url-injection.test.js test/unions-and-nesting.test.js test/library.test.js test/shared-helpers.test.js",
     "test:compile": "node --test test/compile.test.js",
     "test:swift": "node --test test/swift-runtime.test.js",
     "test:quick": "node --test test/generate.test.js test/generate-new-features.test.js test/allof-outgoing.test.js"
@@ -83,6 +83,14 @@
       "openEnums": {
         "description": "When 'true', every generated enum gets an `unknown(RawValue)` case, so values the spec doesn't list decode instead of failing the message. Unknown values are reported to an optional handler passed to the serializer, and encode back unchanged.",
         "default": "false"
+      },
+      "helpersModule": {
+        "description": "Name of a Swift module that provides the shared helpers (lib/helpers.js: the generic WebSocket client, its configuration and policies, the serializers, UnknownEnumValue). When set, only Sources/ is generated, the client imports that module, and its old names become type aliases. Unset (the default), every helper is generated inline with the type prefix.",
+        "required": false
+      },
+      "messagePackHelpersModule": {
+        "description": "With helpersModule and MessagePack serialization: the module that provides MessagePackSerializer (lib/helpers.js generateMessagePackHelpers).",
+        "required": false
       },
       "undecodableMessages": {
         "description": "How to handle messages that fail to decode: 'yield' (default — adds an undecodable case to IncomingMessage so consumers can inspect the raw data and error) or 'drop' (silently skip malformed messages).",
