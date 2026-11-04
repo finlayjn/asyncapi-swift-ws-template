@@ -615,8 +615,18 @@ function buildServerURL(asyncapi, serverName) {
   for (const server of allServers) {
     if (server.id() === serverName) {
       const protocol = server.protocol();
-      const host = server.host();
-      const pathname = typeof server.pathname === 'function' ? server.pathname() : '';
+      // A server variable (`{market}`) takes its default, as AsyncAPI specifies when no value is
+      // given; callers pass the real URL at runtime when it varies.
+      const substitute = (text) => text.replace(/\{([^}]*)\}/g, (_, id) => {
+        const variable = typeof server.variables === 'function' ? server.variables().get(id) : undefined;
+        const value = variable && typeof variable.defaultValue === 'function' ? variable.defaultValue() : undefined;
+        if (value === undefined) {
+          throw new Error(`Server "${serverName}" uses the variable {${id}}, which has no default`);
+        }
+        return String(value);
+      });
+      const host = substitute(server.host());
+      const pathname = typeof server.pathname === 'function' ? substitute(server.pathname() || '') : '';
       const path = pathname && pathname !== '/' ? pathname : '';
       const url = `${protocol}://${host}${path}`;
       if (!/^wss?:\/\/[A-Za-z0-9.\-:/_?=&%#+@!$'()*,;~\[\]]+$/.test(url)) {

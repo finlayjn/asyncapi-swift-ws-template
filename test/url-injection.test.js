@@ -8,7 +8,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { generateResult } = require('./helpers');
+const { generateResult, readGenerated } = require('./helpers');
 const { swiftStringEscape } = require('../helpers/swift');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,5 +77,31 @@ describe('server URL injection prevention (end-to-end)', () => {
       result.error.includes('Unsafe server URL'),
       `error should mention unsafe URL, got: ${result.error.slice(0, 200)}`
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server variables: each takes its default, and the result is still checked
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('server variables', () => {
+  it('fills each variable with its default', () => {
+    const result = generateResult('server-variables.asyncapi.yaml', { server: 'test' });
+    assert.equal(result.success, true, `generation should succeed, got: ${String(result.error).slice(0, 300)}`);
+    const client = readGenerated(result.outputDir, 'Sources/WebSocketClient.swift');
+    assert.ok(client.includes('wss://btcusd.example.com/v2'), 'the default URL uses the variables\' defaults');
+    assert.ok(!client.includes('{market}'), 'no variable is left in the URL');
+  });
+
+  it('rejects a variable without a default', () => {
+    const result = generateResult('server-variable-no-default.asyncapi.yaml', { server: 'test' });
+    assert.equal(result.success, false);
+    assert.ok(result.error.includes('{market}, which has no default'), `got: ${result.error.slice(0, 300)}`);
+  });
+
+  it('still rejects an unsafe default', () => {
+    const result = generateResult('server-variable-unsafe.asyncapi.yaml', { server: 'test' });
+    assert.equal(result.success, false);
+    assert.ok(result.error.includes('Unsafe server URL'), `got: ${result.error.slice(0, 300)}`);
   });
 });

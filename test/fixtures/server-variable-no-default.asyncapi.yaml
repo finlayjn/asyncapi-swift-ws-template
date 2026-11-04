@@ -1,0 +1,30 @@
+asyncapi: 3.0.0
+info:
+  title: Server variables
+  version: 1.0.0
+servers:
+  test:
+    host: "{market}.example.com"
+    pathname: /{version}
+    protocol: wss
+    variables:
+      market:
+        description: no default
+      version:
+        default: v2
+channels:
+  root:
+    address: /
+    messages:
+      ping:
+        payload:
+          type: object
+          properties:
+            type:
+              type: string
+              const: ping
+operations:
+  sendPing:
+    action: send
+    channel:
+      $ref: '#/channels/root'
