@@ -261,8 +261,8 @@ asyncapi-swift-ws-template/
 
 ## Requirements
 
-- **Node.js** 18–24 through the CLI (any version as a library, see above). `@asyncapi/generator` 3.2.1 (bundled with the CLI 6.x) detects template hooks with `fs.promises.stat(path, F_OK)`, which throws on Node 26, so on Node 26 the hooks silently don't run: `Sources/` isn't created (generation fails with `ENOENT`) and the formatter is skipped. Use Node 24 until the generator is fixed; 3.5.0 doesn't load on Node 26 either (it looks for a global npm at load time).
-- **@asyncapi/cli** 6.x (`npm install -g @asyncapi/cli`)
+- **Node.js** 24.11 or later through the CLI, and not 26 (any version as a library, see above). `@asyncapi/cli` 6.2 and `@asyncapi/generator` 3.5 need Node 24.11. On Node 26, `@asyncapi/generator` 3.2.1 (bundled with the CLI 6.x) detects template hooks with `fs.promises.stat(path, F_OK)`, which throws on Node 26, so on Node 26 the hooks silently don't run: `Sources/` isn't created (generation fails with `ENOENT`) and the formatter is skipped. Use Node 24 until the generator is fixed; 3.5.0 doesn't load on Node 26 either (it looks for a global npm at load time).
+- **@asyncapi/cli** 6.2 or later (`npm install -g @asyncapi/cli`)
 - **Swift** 6.0+ (generated code)
 - **Xcode** 16+ / macOS 13+
 - **AsyncAPI spec** v3 with WebSocket (`ws` / `wss`) protocol
