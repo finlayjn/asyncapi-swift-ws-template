@@ -1,0 +1,77 @@
+asyncapi: 3.0.0
+info:
+  title: Channel Key Collision Test WS
+  version: 1.0.0
+  description: Two streams on one server, each with an `auth` message of its own under the same channel key.
+
+servers:
+  local:
+    host: localhost:9200
+    protocol: ws
+
+channels:
+  prices:
+    address: /prices
+    messages:
+      auth:
+        $ref: "#/components/messages/PricesAuth"
+      tick:
+        $ref: "#/components/messages/Tick"
+  journal:
+    address: /journal
+    messages:
+      auth:
+        $ref: "#/components/messages/JournalAuth"
+      tick:
+        $ref: "#/components/messages/Tick"
+
+operations:
+  authenticatePrices:
+    action: send
+    channel:
+      $ref: "#/channels/prices"
+    messages:
+      - $ref: "#/channels/prices/messages/auth"
+  authenticateJournal:
+    action: send
+    channel:
+      $ref: "#/channels/journal"
+    messages:
+      - $ref: "#/channels/journal/messages/auth"
+  receivePrices:
+    action: receive
+    channel:
+      $ref: "#/channels/prices"
+    messages:
+      - $ref: "#/channels/prices/messages/tick"
+  receiveJournal:
+    action: receive
+    channel:
+      $ref: "#/channels/journal"
+    messages:
+      - $ref: "#/channels/journal/messages/tick"
+
+components:
+  messages:
+    PricesAuth:
+      payload:
+        type: object
+        required: [type, token]
+        properties:
+          type: { type: string, const: auth }
+          token: { type: string }
+    JournalAuth:
+      payload:
+        type: object
+        required: [type, token]
+        properties:
+          type: { type: string, const: auth }
+          token: { type: string }
+          from_sequence: { type: integer }
+    Tick:
+      payload:
+        type: object
+        required: [type, price]
+        properties:
+          type: { type: string, const: tick }
+          price: { type: string }

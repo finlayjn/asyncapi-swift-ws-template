@@ -80,6 +80,19 @@ describe('the incoming discriminator at the edges', () => {
   });
 });
 
+describe('messages two channels name alike', () => {
+  it('names different messages that share a channel key after their components', async () => {
+    const files = byPath(generate(await parse('channel-key-collision.asyncapi.yaml'), { server: 'local', perspective: 'client' }));
+    const messages = files['Sources/MessageEnums.swift'];
+    assert.match(messages, /case pricesAuth\(PricesAuth\)/);
+    assert.match(messages, /case journalAuth\(JournalAuth\)/);
+    assert.doesNotMatch(messages, /case auth\(/);
+    assert.match(files['Sources/Models.swift'], /public struct JournalAuth:[\s\S]*?public let fromSequence: Int\?/);
+    // The same message on both channels is still one message, under its key.
+    assert.equal((messages.match(/case tick\(Tick\)/g) || []).length, 1);
+  });
+});
+
 describe('composition and shapes', () => {
   it('merges allOf members, nested ones too, with a schema\'s own properties', async () => {
     const models = byPath(generate(await parse('composition-and-shapes.asyncapi.yaml'), { server: 'local' }))['Sources/Models.swift'];

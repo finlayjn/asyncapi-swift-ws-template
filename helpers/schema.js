@@ -20,6 +20,12 @@ function call(obj, method) {
   return obj[method];
 }
 
+/** The key of the component a message was defined as (`components.messages`), if any. */
+function componentKey(message) {
+  const json = typeof message.json === 'function' ? message.json() : null;
+  return (json && json['x-parser-message-name']) || null;
+}
+
 /**
  * Extract all messages from operations, tagged with direction (send/receive).
  */
@@ -30,6 +36,28 @@ function extractMessages(asyncapi) {
   const operations = asyncapi.operations();
   if (!operations) return messages;
   const allOps = typeof operations.all === 'function' ? operations.all() : [];
+  const opMessagesOf = (operation) => {
+    const opMessages = operation.messages();
+    return opMessages && typeof opMessages.all === 'function' ? opMessages.all() : [];
+  };
+
+  // A message without a `name` is called by its channel's key for it, and two channels can give
+  // different messages the same key (each stream's own `auth`). Those are all named after their
+  // components instead, whatever order they come in.
+  const componentsByKey = new Map(); // channel key → component keys
+  for (const operation of allOps) {
+    for (const message of opMessagesOf(operation)) {
+      const component = componentKey(message);
+      if (message.name() || !message.id() || !component) continue;
+      if (!componentsByKey.has(message.id())) componentsByKey.set(message.id(), new Set());
+      componentsByKey.get(message.id()).add(component);
+    }
+  }
+  const nameOf = (message) => {
+    if (message.name()) return message.name();
+    const shared = (componentsByKey.get(message.id())?.size ?? 0) > 1;
+    return shared ? componentKey(message) : message.id();
+  };
 
   for (const operation of allOps) {
     const action = operation.action();
@@ -38,8 +66,11 @@ function extractMessages(asyncapi) {
     const allMsgs = typeof opMessages.all === 'function' ? opMessages.all() : [];
 
     for (const message of allMsgs) {
-      const messageName = message.name() || message.id();
-      const messageId = message.id() || messageName;
+      const messageName = nameOf(message);
+      // A message's identity is its component, where it has one: the parser's id is the
+      // channel's key for it, which two channels can give different messages (`auth` on two
+      // streams), and those mustn't pass for one message.
+      const messageId = componentKey(message) || message.id() || messageName;
       if (!messageName) continue;
 
       if (seen.has(messageName)) {
