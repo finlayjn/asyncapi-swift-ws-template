@@ -119,6 +119,7 @@ function extractMessages(asyncapi) {
           payload,
           constTypeValue,
           discriminatorKey,
+          consts: payloadConsts(payload),
           hasObjectPayload,
           title: (typeof message.title === 'function' ? message.title() : '') || '',
           summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
@@ -180,6 +181,7 @@ function extractMessages(asyncapi) {
         payload,
         constTypeValue,
         discriminatorKey,
+        consts: payloadConsts(payload),
         hasObjectPayload,
         title: (typeof message.title === 'function' ? message.title() : '') || '',
         summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
@@ -493,6 +495,62 @@ function scanForEnums(schema, contextName, enumMap) {
  * Flatten an allOf-composed schema into merged properties and required fields.
  * Returns { properties: { ... }, requiredFields: [...] } or null if not allOf.
  */
+/**
+ * Every property of an object payload with a `const`, as `[key, value]` pairs in property order
+ * (an `allOf` payload's members flattened, first member first). The incoming message enum chooses
+ * its discriminator from these across all messages (`chooseDiscriminator`), since a payload can
+ * carry more than one constant: a shared member's (`currency: USD`) beside its own type.
+ */
+function payloadConsts(payload) {
+  if (!payload) return [];
+  let props = typeof payload.properties === 'function' ? payload.properties() : null;
+  if (!props || typeof props !== 'object' || Object.keys(props).length === 0) {
+    props = flattenAllOf(payload)?.properties ?? null;
+  }
+  if (!props) return [];
+  const consts = [];
+  for (const [key, propSchema] of Object.entries(props)) {
+    const c = call(propSchema, 'const');
+    if (c !== undefined && c !== null) consts.push([key, String(c)]);
+  }
+  return consts;
+}
+
+/**
+ * The key that tells incoming object messages apart, and each message's value for it.
+ *
+ * Of the keys any message gives a constant, the one that covers the most messages with distinct
+ * values wins (ties: the key seen first). A message without that key matches on its name. Two
+ * messages that would match the same value fail generation: the second could never decode.
+ */
+function chooseDiscriminator(messages, enumName) {
+  const keys = [];
+  for (const msg of messages) {
+    for (const [key] of msg.consts || []) if (!keys.includes(key)) keys.push(key);
+  }
+  let best = null;
+  for (const key of keys) {
+    const values = messages.map(m => (m.consts || []).find(([k]) => k === key)?.[1]).filter(v => v !== undefined);
+    if (new Set(values).size !== values.length) continue;
+    if (!best || values.length > best.covered) best = { key, covered: values.length };
+  }
+  const key = best ? best.key : 'type';
+  const values = new Map();
+  const owners = new Map();
+  for (const msg of messages) {
+    const value = (msg.consts || []).find(([k]) => k === key)?.[1] ?? msg.messageName;
+    if (owners.has(value)) {
+      throw new Error(
+        `${enumName}: incoming messages "${owners.get(value)}" and "${msg.messageName}" would both decode on ` +
+        `${key} = "${value}", so "${msg.messageName}" could never be received. Give each message a distinct constant.`
+      );
+    }
+    owners.set(value, msg.messageName);
+    values.set(msg.messageName, value);
+  }
+  return { key, values };
+}
+
 function flattenAllOf(schema) {
   if (!schema) return null;
 
@@ -845,6 +903,7 @@ function extractInlineStructs(asyncapi) {
 
 module.exports = {
   extractMessages,
+  chooseDiscriminator,
   extractSchemas,
   extractEnums,
   schemaToPlain,

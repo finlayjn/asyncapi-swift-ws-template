@@ -164,3 +164,19 @@ let package = Package(
     assert.equal(warnings, 0, `expected 0 warnings:\n${output}`);
   });
 });
+
+describe('the incoming discriminator', () => {
+  it('is the constant that tells every message apart, not a shared member\'s', async () => {
+    const files = byPath(generate(await parse('allof-shared-const.asyncapi.yaml'), { server: 'local' }));
+    const messages = Object.entries(files).find(([p]) => /MessageEnums|Messages/.test(p))?.[1] ?? Object.values(files).join('\n');
+    assert.match(messages, /case "portfolio_snapshot":/);
+    assert.match(messages, /case "portfolio_update":/);
+    assert.match(messages, /case "heartbeat":/);
+    assert.doesNotMatch(messages, /case "USD":/);
+  });
+
+  it('fails generation when two messages would share a value', async () => {
+    const document = await parse('duplicate-discriminator.asyncapi.yaml');
+    assert.throws(() => generate(document, { server: 'local' }), /"snapshot" and "update" would both decode on type = "portfolio_snapshot"/);
+  });
+});

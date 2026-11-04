@@ -1,0 +1,74 @@
+asyncapi: 3.0.0
+info:
+  title: Test Duplicate Discriminator
+  version: 1.0.0
+  description: |
+    Incoming messages composed with allOf from a shared object that carries a constant
+    (currency) and an envelope that carries the real discriminator (type).
+
+servers:
+  local:
+    host: localhost:9010
+    protocol: ws
+
+channels:
+  portfolio:
+    address: /
+    messages:
+      snapshot:
+        $ref: "#/components/messages/Snapshot"
+      update:
+        $ref: "#/components/messages/Update"
+      heartbeat:
+        $ref: "#/components/messages/Heartbeat"
+
+operations:
+  receivePortfolio:
+    action: send
+    channel:
+      $ref: "#/channels/portfolio"
+    messages:
+      - $ref: "#/channels/portfolio/messages/snapshot"
+      - $ref: "#/channels/portfolio/messages/update"
+      - $ref: "#/channels/portfolio/messages/heartbeat"
+
+components:
+  schemas:
+    Dashboard:
+      type: object
+      properties:
+        currency:
+          type: string
+          const: USD
+        equity:
+          type: string
+      required: [currency, equity]
+  messages:
+    Snapshot:
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/Dashboard"
+          - type: object
+            properties:
+              type:
+                type: string
+                const: portfolio_snapshot
+            required: [type]
+    Update:
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/Dashboard"
+          - type: object
+            properties:
+              type:
+                type: string
+                const: portfolio_snapshot
+            required: [type]
+    Heartbeat:
+      payload:
+        type: object
+        properties:
+          type:
+            type: string
+            const: heartbeat
+        required: [type]
