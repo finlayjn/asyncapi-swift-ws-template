@@ -202,8 +202,13 @@ function jsonSchemaTypeToSwift(prop, isRequired = true, parentName = '', inlineS
 
   let swiftType;
 
-  // Handle enum — if it has const, it's a discriminator field, just use String
-  if (prop.const !== undefined) {
+  // A string const is a discriminator field (`type: "snapshot"`): just use String. A const of
+  // another type (`v: { type: integer, const: 2 }`) is typed as its schema says, inferred from
+  // the value when the schema gives no type.
+  if (prop.const !== undefined && !prop.type && typeof prop.const !== 'string') {
+    prop = { ...prop, type: typeof prop.const === 'boolean' ? 'boolean' : Number.isInteger(prop.const) ? 'integer' : 'number' };
+  }
+  if (prop.const !== undefined && (prop.type === undefined || prop.type === 'string')) {
     swiftType = 'String';
   } else if (prop.enum) {
     // A dedicated Swift enum type when extraction registered one (top-level properties are

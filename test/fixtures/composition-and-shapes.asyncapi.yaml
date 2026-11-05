@@ -67,9 +67,11 @@ components:
       name: fill
       payload:
         type: object
-        required: [type]
+        required: [type, v]
         properties:
           type: { type: string, const: fill }
+          v: { type: integer, const: 2 }
+          final: { const: true }
           detail:
             type: object
             properties:

@@ -656,8 +656,10 @@ function buildPropertyList(schema, parentSwiftName, enumDefs, inlineStructMap) {
       swiftName: swiftPropName,
       swiftType,
       isRequired,
-      isConst: plain.const !== undefined,
-      constVal: plain.const || null,
+      // A string const is a discriminator, set by the model itself; a const of another type
+      // (`v: { type: integer, const: 2 }`) is an ordinary field of its own type.
+      isConst: typeof plain.const === 'string',
+      constVal: typeof plain.const === 'string' ? plain.const : null,
       description: plain.description || '',
       wireFormat: propName,
       requiredIndex: requiredFields.indexOf(propName),

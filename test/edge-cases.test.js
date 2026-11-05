@@ -109,6 +109,15 @@ describe('composition and shapes', () => {
     assert.match(models, /public struct Venue:[\s\S]*?public let id: String\?/);
   });
 
+  it('types a non-string constant as its schema says, leaving only string constants to discriminate', async () => {
+    const models = byPath(generate(await parse('composition-and-shapes.asyncapi.yaml'), { server: 'local' }))['Sources/Models.swift'];
+    const fill = models.slice(models.indexOf('public struct Fill:'), models.indexOf('public struct', models.indexOf('public struct Fill:') + 1));
+    assert.match(fill, /public let v: Int\n/);
+    assert.match(fill, /public let `final`: Bool\?/);
+    assert.match(fill, /public let `?type`?: String/);
+    assert.doesNotMatch(fill, /self\.v = "2"/);
+  });
+
   it('backs an enum of non-integer numbers with Double', async () => {
     const files = byPath(generate(await parse('msgpack-array-tags.asyncapi.yaml'), { server: 'local', serialization: 'msgpack', msgpackFormat: 'array' }));
     const enums = files['Sources/Enums.swift'];
