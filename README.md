@@ -22,7 +22,8 @@ An [AsyncAPI Generator](https://github.com/asyncapi/generator) template that pro
 - **Enums with a `null` member** — `enum: [a, b, null]` makes the property optional rather than adding a `null` case
 - **Integer & string enums** — automatically detects `Int`-backed enums from integer enum values alongside `String`-backed enums. Enum values containing dots (e.g. `sensor.alarm.high_temperature`) are treated as word separators and converted to valid camelCase Swift identifiers with explicit raw value assignments
 - **Undecodable message handling** — messages that fail to decode are surfaced as `.undecodable(Data, any Error)` cases on `IncomingMessage` by default, giving consumers access to the raw data and error for logging or debugging. Pass `undecodableMessages=drop` to silently skip malformed messages instead
-- **Non-object message payloads** — plain string/const messages (e.g. `PING`/`PONG`) are handled as `String` cases without requiring a struct
+- **Plain-text messages** — a message with a `text/...` `contentType` and a string payload (e.g. `PING`/`PONG`) is a `String` case, sent as the raw text of a text frame rather than JSON-encoded, and a raw text frame is matched to it by its `const` or `enum` values before any decoding. So a server's plain-text replies (`INVALID MESSAGE`) can be declared as one message with an `enum`. A string message with a JSON content type is still read from and written as a JSON string
+- **Array messages** — a message whose payload is an array is a frame that is a JSON array (e.g. several order books in one frame). Its case holds the items, typed as the message whose payload is the items' schema when there is one (`case bookSnapshots([Book])`), else as the items' own type. Not supported with `msgpackFormat=array`, where every message is an array
 - **Public initializers** — all generated structs include explicit `public init(...)` methods; `const` fields are auto-assigned and excluded from parameters
 - **Server pathname support** — the generator appends the server's `pathname` to the `host` when building the default URL
 - **SPM package** — generates a complete Swift Package Manager project targeting Apple platforms
@@ -377,7 +378,7 @@ cd output/basic && swift build
 ## Known limitations
 
 - **AsyncAPI v3 only** — v2 specs are not supported. The parser v3 API (`.all()` collections, method-based schema accessors) is used throughout.
-- **Single discriminator key** — incoming object messages are told apart by one property: the first that every message with a `const` gives a `const`, with a different value in each (so a constant they share, such as a channel, is skipped). A message with no `const` matches on its name. If no property qualifies, or two messages would match the same value, generation fails, since one of them could never be received. Non-object payloads (plain strings) are matched by their `const` value.
+- **Single discriminator key** — incoming object messages are told apart by one property: the first that every message with a `const` gives a `const`, with a different value in each (so a constant they share, such as a channel, is skipped). A message with no `const` matches on its name. If no property qualifies, or two messages would match the same value, generation fails, since one of them could never be received. Plain-string payloads are matched by their `const` or `enum` values (raw text frames for `text/...` messages, before decoding), and array payloads by the frame being an array: with several array messages, the first whose items decode wins.
 - **Unions** — object unions need a shared `const` discriminator property; unions mixing objects and primitives, or objects without a discriminator, fall back to `JSONValue`. Object unions aren't generated for `msgpackFormat=array` (they need keyed containers).
 - **Tuples** — tuple elements must be primitives (or enums of them); a tuple with an object element falls back to `[JSONValue]`.
 - **Single connection per client** — the generated actor manages one `URLSessionWebSocketTask` at a time. Multiple concurrent connections require multiple client instances.
@@ -396,7 +397,7 @@ cd output/basic && swift build
 - [x] **Name collision detection** — hard error when different messages share the same name; `allowNameCollisions` bypass with disambiguation
 - [x] **`allOf` schema merging** — `allOf` schemas are flattened into a single struct with merged properties and required fields
 - [x] **Integer enum raw types** — detect numeric enums and generate `Int`-backed Swift enums
-- [x] **Non-object message payloads** — plain string/const messages handled as `String` enum cases
+- [x] **Non-object message payloads** — plain-text messages sent and matched as raw text, and array messages from array frames
 - [x] **Open enums** — `openEnums=true` adds `unknown(RawValue)` to every enum, with an unknown-value report hook
 - [x] **Unions** — primitive unions and discriminated object unions become enums instead of `JSONValue`
 - [x] **Tuples** — mixed-type `prefixItems` become array-encoded structs

@@ -27,6 +27,72 @@ function componentKey(message) {
 }
 
 /**
+ * A message as the generators use it. Besides the payload and its constants:
+ *
+ * - `isText`: a plain-text message (`contentType` `text/...`, a string payload), sent and
+ *   received as the raw text of a text frame rather than as JSON;
+ * - `textValues`: the texts a plain message can be (its `const`, or its `enum`);
+ * - `arrayItems`: for an array payload, the schema of its items. Such a message is a frame
+ *   that is a JSON array.
+ */
+function describeMessage(message, messageName, action) {
+  const payload = message.payload();
+  let constTypeValue = null;
+  let discriminatorKey = null;
+  let hasObjectPayload = false;
+
+  // An object payload: its own properties and its allOf members'
+  const shape = objectShape(payload);
+  if (shape) {
+    hasObjectPayload = true;
+    for (const [key, propSchema] of Object.entries(shape.properties)) {
+      const c = call(propSchema, 'const');
+      if (c !== undefined && c !== null) {
+        discriminatorKey = key;
+        constTypeValue = String(c);
+        break;
+      }
+    }
+  }
+
+  // For non-object payloads (plain string), check the payload itself for a const
+  if (!hasObjectPayload && payload) {
+    const c = call(payload, 'const');
+    if (c !== undefined && c !== null) {
+      constTypeValue = String(c);
+    }
+  }
+
+  const payloadType = hasObjectPayload ? 'object' : call(payload, 'type');
+  const arrayItems = payloadType === 'array' ? (call(payload, 'items') || null) : null;
+  const contentType = call(message, 'contentType') || null;
+  const isText = !hasObjectPayload && !arrayItems && typeof contentType === 'string' && contentType.startsWith('text/');
+  let textValues = null;
+  if (!hasObjectPayload && !arrayItems) {
+    const values = call(payload, 'enum');
+    if (constTypeValue !== null) textValues = [constTypeValue];
+    else if (Array.isArray(values) && values.length > 0) textValues = values.map(String);
+  }
+
+  return {
+    messageName,
+    swiftName: toSwiftTypeName(messageName),
+    direction: action,
+    payload,
+    constTypeValue,
+    discriminatorKey,
+    consts: payloadConsts(payload),
+    hasObjectPayload,
+    arrayItems,
+    contentType,
+    isText,
+    textValues,
+    title: (typeof message.title === 'function' ? message.title() : '') || '',
+    summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
+  };
+}
+
+/**
  * Extract all messages from operations, tagged with direction (send/receive).
  */
 function extractMessages(asyncapi) {
@@ -100,87 +166,12 @@ function extractMessages(asyncapi) {
         const disambiguatedName = messageId;
         seen.set(disambiguatedName, { action, messageId });
 
-        const payload = message.payload();
-        let constTypeValue = null;
-        let discriminatorKey = null;
-        let hasObjectPayload = false;
-
-        // An object payload: its own properties and its allOf members'
-        const shape = objectShape(payload);
-        if (shape) {
-          hasObjectPayload = true;
-          for (const [key, propSchema] of Object.entries(shape.properties)) {
-            const c = call(propSchema, 'const');
-            if (c !== undefined && c !== null) {
-              discriminatorKey = key;
-              constTypeValue = String(c);
-              break;
-            }
-          }
-        }
-
-        if (!hasObjectPayload && payload) {
-          const c = call(payload, 'const');
-          if (c !== undefined && c !== null) {
-            constTypeValue = String(c);
-          }
-        }
-
-        messages.push({
-          messageName: disambiguatedName,
-          swiftName: toSwiftTypeName(disambiguatedName),
-          direction: action,
-          payload,
-          constTypeValue,
-          discriminatorKey,
-          consts: payloadConsts(payload),
-          hasObjectPayload,
-          title: (typeof message.title === 'function' ? message.title() : '') || '',
-          summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
-        });
+        messages.push(describeMessage(message, disambiguatedName, action));
         continue;
       }
       seen.set(messageName, { action, messageId });
 
-      const payload = message.payload();
-      let constTypeValue = null;
-      let discriminatorKey = null;
-      let hasObjectPayload = false;
-
-      // An object payload: its own properties and its allOf members'
-      const shape = objectShape(payload);
-      if (shape) {
-        hasObjectPayload = true;
-        for (const [key, propSchema] of Object.entries(shape.properties)) {
-          const c = call(propSchema, 'const');
-          if (c !== undefined && c !== null) {
-            discriminatorKey = key;
-            constTypeValue = String(c);
-            break;
-          }
-        }
-      }
-
-      // For non-object payloads (plain string), check the payload itself for a const
-      if (!hasObjectPayload && payload) {
-        const c = call(payload, 'const');
-        if (c !== undefined && c !== null) {
-          constTypeValue = String(c);
-        }
-      }
-
-      messages.push({
-        messageName,
-        swiftName: toSwiftTypeName(messageName),
-        direction: action,
-        payload,
-        constTypeValue,
-        discriminatorKey,
-        consts: payloadConsts(payload),
-        hasObjectPayload,
-        title: (typeof message.title === 'function' ? message.title() : '') || '',
-        summary: (typeof message.summary === 'function' ? message.summary() : '') || '',
-      });
+      messages.push(describeMessage(message, messageName, action));
     }
   }
 

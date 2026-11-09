@@ -1,0 +1,129 @@
+asyncapi: 3.0.0
+info:
+  title: Text and array frames
+  version: 1.0.0
+  description: >-
+    Plain-text messages (a keepalive and the server's text errors) beside JSON ones, and a
+    frame that is an array of another message's payloads. Written from the client's side.
+defaultContentType: application/json
+
+servers:
+  local:
+    host: localhost:9000
+    protocol: ws
+
+channels:
+  market:
+    address: /
+    messages:
+      subscribe:
+        $ref: "#/components/messages/Subscribe"
+      ping:
+        $ref: "#/components/messages/Ping"
+      pong:
+        $ref: "#/components/messages/Pong"
+      serverError:
+        $ref: "#/components/messages/ServerError"
+      book:
+        $ref: "#/components/messages/Book"
+      bookSnapshots:
+        $ref: "#/components/messages/BookSnapshots"
+      quote:
+        $ref: "#/components/messages/Quote"
+
+operations:
+  sendToServer:
+    action: send
+    channel:
+      $ref: "#/channels/market"
+    messages:
+      - $ref: "#/channels/market/messages/subscribe"
+      - $ref: "#/channels/market/messages/ping"
+
+  receiveFromServer:
+    action: receive
+    channel:
+      $ref: "#/channels/market"
+    messages:
+      - $ref: "#/channels/market/messages/pong"
+      - $ref: "#/channels/market/messages/serverError"
+      - $ref: "#/channels/market/messages/book"
+      - $ref: "#/channels/market/messages/bookSnapshots"
+      - $ref: "#/channels/market/messages/quote"
+
+components:
+  messages:
+    Subscribe:
+      name: subscribe
+      payload:
+        type: object
+        properties:
+          assets_ids:
+            type: array
+            items:
+              type: string
+        required: [assets_ids]
+
+    Ping:
+      name: ping
+      contentType: text/plain
+      payload:
+        type: string
+        const: PING
+
+    Pong:
+      name: pong
+      contentType: text/plain
+      payload:
+        type: string
+        const: PONG
+
+    ServerError:
+      name: serverError
+      summary: The server's plain-text answer to a frame it can't use
+      contentType: text/plain
+      payload:
+        type: string
+        enum:
+          - INVALID MESSAGE
+          - INVALID ASSET IDS
+
+    Book:
+      name: book
+      payload:
+        $ref: "#/components/schemas/BookEvent"
+
+    BookSnapshots:
+      name: bookSnapshots
+      summary: Several books in one frame
+      payload:
+        type: array
+        items:
+          $ref: "#/components/schemas/BookEvent"
+
+    Quote:
+      name: quote
+      payload:
+        type: object
+        properties:
+          event_type:
+            type: string
+            const: quote
+          price:
+            type: string
+        required: [event_type, price]
+
+  schemas:
+    BookEvent:
+      type: object
+      properties:
+        event_type:
+          type: string
+          const: book
+        asset_id:
+          type: string
+        bids:
+          type: array
+          items:
+            type: string
+      required: [event_type, asset_id, bids]

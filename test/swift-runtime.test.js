@@ -122,6 +122,24 @@ describe('Swift runtime tests — the connection lifecycle', () => {
   });
 });
 
+describe('Swift runtime tests — plain-text and array frames', () => {
+  let out;
+  const testFile = path.join(__dirname, 'swift-tests', 'FramesTests.swift');
+
+  before(() => {
+    out = generate('text-and-array-frames.asyncapi.yaml', { server: 'local', perspective: 'client', packageName: 'RuntimeTestFrames' });
+    injectTestMain(out, testFile);
+  });
+
+  it('sends plain text raw, matches raw text frames and decodes array frames against a real server', () => {
+    const result = swiftRun(out);
+    if (!result.success) {
+      assert.fail(`Swift frames tests failed:\n${result.output}`);
+    }
+    assert.match(result.output, /FramesTests: \d+ passed, 0 failed/);
+  });
+});
+
 describe('Swift runtime tests — MessagePack arrays', () => {
   let out;
   const testFile = path.join(__dirname, 'swift-tests', 'ArrayTagsTests.swift');
